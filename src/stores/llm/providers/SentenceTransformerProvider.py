@@ -70,3 +70,14 @@ class SentenceTransformerProvider(LLMInterface):
 
     def construct_prompt(self, prompt: str, role: str):
         return {"role": role, "content": prompt}
+
+    def generate_with_tools(
+            self,
+            messages: list,
+            tools: list,
+            max_output_tokens: int = None,
+            temperature: float = None,
+        ):
+            pass
+
+    
