@@ -12,6 +12,14 @@ from helpers.metadata import FILTERABLE_METADATA
 from .enums.nlp import ProcessControllerEnums
 from models.ConversationModel import ConversationModel
 from services.PromptInjuction import PromptInjectionDetector
+
+from services.AgentService import AgentService
+from tools.ToolRegistry import ToolRegistry
+from tools.healthcare.HealthcareTool import HealthcareTool
+from tools.rag.RAGTool import RAGTool
+
+from services.AgentService import AgentContext
+
 from fastapi import UploadFile
 import os
 import tempfile
@@ -48,6 +56,25 @@ class NLPController(BaseController):
         self.prompt_injuction = PromptInjectionDetector(
             generation_client=self.ligthweigth_client,
             template_parser=self.template_parser
+        )
+
+        tool_registry = ToolRegistry()
+
+        rag_tool = RAGTool()
+        healthcare_tool = HealthcareTool()
+
+        tool_registry.register(rag_tool)
+        tool_registry.register(healthcare_tool)
+
+        self.agent_service = AgentService(
+            llm=self.generation_client,
+            tool_registry=tool_registry,
+        )
+
+        self.rag_tool = rag_tool
+
+        self.rag_tool.set_rag_handler(
+            self.answer_rag_questions
         )
         self.logger = logging.getLogger("uvicorn")
 
@@ -484,7 +511,51 @@ class NLPController(BaseController):
 
         finally:
             os.remove(image_path)
-        
+
+
+    async def _build_query_with_vision(self, query: str, image: UploadFile | None) -> str:
+        if not image:
+            return query
+
+        vision_context = await self.extract_image_context(image=image)
+
+        if not vision_context:
+            return query
+
+        self.logger.info(f"Generated description {vision_context}")
+
+        return f"""
+            سؤال المستخدم:
+            {query}
+
+            محتوى الصورة:
+            {vision_context}
+            """.strip()
+
+
+    async def _rewrite_query(self, rewrite_query: str, rewrite_history, previous_summary: str) -> str:
+        query_rewriter_prompt = self.template_parser.get(
+            group="rag",
+            key="query_rewriter_prompt",
+            vars={
+                "chat_history": rewrite_history,
+                "previous_summary": previous_summary,
+                "query": rewrite_query,
+            }
+        )
+
+        rewritten_query = self.ligthweigth_client.generate_text(
+            prompt=query_rewriter_prompt,
+            chat_history=[]
+        )
+
+        return (rewritten_query or rewrite_query).strip()
+
+
+    def _detect_injection(self, query: str) -> dict:
+        return self.prompt_injuction.detect(query=query)
+    
+            
 
     async def answer_chat_question(
     self,
@@ -493,47 +564,21 @@ class NLPController(BaseController):
     query: str,
     image: UploadFile | None = None,
     limit: int = 10,
-    retrieval_limit: int = 20):
+    retrieval_limit: int = 20,
+    latitude: float | None = None,
+    longitude: float | None = None
+    ):
 
-        vision_context = ""
+        rewrite_query = await self._build_query_with_vision(query=query, image=image)
 
-        if image:
-            vision_context = await self.extract_image_context(image=image)
+        injection_result = self._detect_injection(rewrite_query)
 
-        if vision_context:
-            self.logger.info(
-                f"Generated description {vision_context}"
-            )
-
-        rewrite_query = query
-
-        if vision_context:
-            rewrite_query = f"""
-                سؤال المستخدم:
-                {query}
-
-                محتوى الصورة:
-                {vision_context}
-                """.strip()
-
-        result = self.prompt_injuction.detect(query=rewrite_query)
-
-        if result["is_injection"]:
-            self.logger.warning(
-                "Prompt injection detected: %s",
-                result.get("reason"),
-            )
-
+        if injection_result["is_injection"]:
+            self.logger.warning("Prompt injection detected: %s", injection_result.get("reason"))
             return (
                 ProcessControllerEnums.PORMPT_INJUCTED_ANSWER.value,
-                None,
-                [],
-                [],
-                query,
-                {},
-                []
+                None, [], [], query, {}, []
             )
-
 
 
         # 1. Load previous messages
@@ -555,39 +600,29 @@ class NLPController(BaseController):
             messages=messages
         )
 
-        query_rewriter_prompt = self.template_parser.get(
-                    group="rag",
-                    key="query_rewriter_prompt",
-                    vars={
-                        "chat_history" : rewrite_history,
-                        "previous_summary":previous_summary,
-                        "query" : rewrite_query
-                    }
+        rewritten_query = await self._rewrite_query(rewrite_query=rewrite_query, rewrite_history=rewrite_history, previous_summary=previous_summary)
+
+
+        context = AgentContext(
+            project=project,
+            chat_history=chat_history,
+            limit=limit,
+            retrieval_limit=retrieval_limit,
+            latitude=latitude,
+            longitude=longitude,
         )
-
-        rewritten_query = self.ligthweigth_client.generate_text(
-            prompt=query_rewriter_prompt,
-            chat_history=[]
-        )
-
-        if not rewritten_query:
-            rewritten_query=query
-
-
-        rewritten_query = rewritten_query.strip()
-
         
 
         # 4. Run RAG
-        answer, full_prompt, _, retrieved_documents, filters, citations = (
-            await self.answer_rag_questions(
-                project=project,
-                query=rewritten_query,
-                limit=limit,
-                retrieval_limit=retrieval_limit,
-                chat_history=chat_history
-            )
+        agent_result = await self.agent_service.run(
+            query=rewritten_query,
+            context=context
         )
+        answer = agent_result["answer"]
+        full_prompt = agent_result["full_prompt"]
+        retrieved_documents = agent_result["retrieved_documents"]
+        filters = agent_result["filters"]
+        citations = agent_result["citations"]
 
         if not answer:
             return answer, full_prompt, retrieved_documents, chat_history, rewritten_query, filters, citations
@@ -631,7 +666,7 @@ class NLPController(BaseController):
 
             # Convert recent messages to text
             recent_history = self.build_rewrite_history(
-                messages=recent_history
+                messages=recent_messages
             )
 
             # 9. Generate updated rolling summary
