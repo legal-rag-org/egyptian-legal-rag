@@ -263,7 +263,7 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
         vision_client=request.app.vision_client 
     )
 
-    answer, full_prompt, chat_history, retreived_documents = await nlp_controller.answer_rag_questions(
+    answer, full_prompt, chat_history, retreived_documents, filters, citations = await nlp_controller.answer_rag_questions(
         project=project,
         query=search_request.text,
         retrieval_limit=search_request.reranker_limit,
@@ -284,7 +284,9 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
         "answer": answer,
         "full_prompt": full_prompt,
         "chat_history": chat_history,
-        "retreived_documents": retreived_documents
+        "retreived_documents": retreived_documents,
+        "filters" : filters,
+        "citations" : citations
     })
 )
 
@@ -299,6 +301,9 @@ async def chat(
     reranker_limit: int = Form(20),
     title: Optional[str] = Form("New conversation"),
 
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+
     image: UploadFile | None = File(None),
 ):
 
@@ -308,6 +313,8 @@ async def chat(
         limit=limit,
         reranker_limit=reranker_limit,
         title=title,
+        latitude=latitude,
+        longitude=longitude
     )
 
     project_model = await ProjectModel.create_instance(
@@ -359,7 +366,9 @@ async def chat(
             query=chat_request.text,
             image=image,
             retrieval_limit=chat_request.reranker_limit,
-            limit=chat_request.limit
+            limit=chat_request.limit,
+            latitude=chat_request.latitude,
+            longitude=chat_request.longitude
         )
     )
 
