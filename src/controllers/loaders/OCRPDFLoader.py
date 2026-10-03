@@ -14,12 +14,25 @@ class OCRDocument:
 
 class OCRPDFLoader:
 
-    def __init__(self, file_path: str, dpi: int = 150, excluded_pages: list[int] | None = None):
+    def __init__(
+        self,
+        file_path: str,
+        dpi: int = 300,
+        excluded_pages: list[int] | None = None
+    ):
         self.file_path = file_path
         self.dpi = dpi
         self.excluded_pages = set(
             excluded_pages or []
         )
+
+    def normalize_arabic_digits(self, text: str) -> str:
+        translation_table = str.maketrans(
+            "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹",
+            "01234567890123456789"
+        )
+
+        return text.translate(translation_table)
 
     def load(self):
 
@@ -52,8 +65,11 @@ class OCRPDFLoader:
 
             text = pytesseract.image_to_string(
                 image,
-                lang="ara"
+                lang="ara",
+                config="--psm 6"
             )
+
+            text = self.normalize_arabic_digits(text)
 
             if not text.strip():
                 continue

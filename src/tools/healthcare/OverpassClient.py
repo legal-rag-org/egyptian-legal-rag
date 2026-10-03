@@ -13,7 +13,7 @@ class OverpassClient:
     ) -> list[dict]:
 
         query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:60];
 
         (
             node["amenity"="hospital"]
@@ -42,12 +42,12 @@ class OverpassClient:
         """
 
         headers = {
-            "User-Agent": "insurance-pension-rag/1.0",
+            "User-Agent": "egyptian-legal-rag/1.0",
             "Accept": "application/json",
         }
 
         async with httpx.AsyncClient(
-            timeout=30,
+            timeout=70,
             headers=headers,
         ) as client:
 

@@ -382,6 +382,52 @@ class PGVectorProvider(VectorDBInterface):
 
             return True
 
+
+    def _build_metadata_filters(
+        self,
+        filters: dict | None,
+        params: dict,
+        param_prefix: str = "filter",
+    ) -> list[str]:
+
+        if not filters:
+            return []
+
+        conditions = []
+
+        for index, (key, value) in enumerate(filters.items()):
+
+            if key not in FILTERABLE_METADATA:
+                continue
+
+            # domain can contain multiple values
+            if key == "domain":
+                domains = value if isinstance(value, list) else [value]
+
+                placeholders = []
+
+                for domain_index, domain in enumerate(domains):
+                    param_name = f"{param_prefix}_{index}_{domain_index}"
+
+                    placeholders.append(f":{param_name}")
+                    params[param_name] = str(domain)
+
+                if placeholders:
+                    conditions.append(
+                        f"metadata->>'{key}' IN ({', '.join(placeholders)})"
+                    )
+
+            else:
+                param_name = f"{param_prefix}_{index}"
+
+                conditions.append(
+                    f"metadata->>'{key}' = :{param_name}"
+                )
+
+                params[param_name] = str(value)
+
+        return conditions
+
     
     async def search_by_vector(self, collection_name: str,
                                    vector: list,
@@ -406,19 +452,13 @@ class PGVectorProvider(VectorDBInterface):
                             "limit": limit,
                         }
 
-                        if filters:
-                            for index, (key, value) in enumerate(filters.items()):
-
-                                if key not in FILTERABLE_METADATA:
-                                    continue
-
-                                param_name = f"filter_{index}"
-
-                                conditions.append(
-                                    f"metadata->>'{key}' = :{param_name}"
-                                )
-
-                                params[param_name] = str(value)
+                        conditions.extend(
+                            self._build_metadata_filters(
+                                filters=filters,
+                                params=params,
+                                param_prefix="vector_filter",
+                            )
+                        )
 
                         where_clause = ""
 
@@ -493,19 +533,13 @@ class PGVectorProvider(VectorDBInterface):
                     "limit": limit,
                 }
 
-                if filters:
-                    for index, (key, value) in enumerate(filters.items()):
-
-                        if key not in FILTERABLE_METADATA:
-                            continue
-
-                        param_name = f"filter_{index}"
-
-                        conditions.append(
-                            f"metadata->>'{key}' = :{param_name}"
-                        )
-
-                        params[param_name] = str(value)
+                conditions.extend(
+                    self._build_metadata_filters(
+                        filters=filters,
+                        params=params,
+                        param_prefix="keyword_filter",
+                    )
+                )
 
                 where_clause = " AND ".join(conditions)
 
@@ -548,6 +582,21 @@ class PGVectorProvider(VectorDBInterface):
 
 
 
+    def arabic_to_english_digits(self, text: str) -> str:
+        translation_table = str.maketrans(
+            "٠١٢٣٤٥٦٧٨٩",
+            "0123456789"
+        )
+
+        return text.translate(translation_table)
+
+    def english_to_arabic_digits(self, text: str) -> str:
+        translation_table = str.maketrans(
+            "0123456789",
+            "٠١٢٣٤٥٦٧٨٩"
+        )
+
+        return text.translate(translation_table)
 
     async def search_by_numeric(
             self,
@@ -568,7 +617,12 @@ class PGVectorProvider(VectorDBInterface):
             return []
 
         # Extract numeric tokens from query
-        numbers = re.findall(r"(?<!\d)\d+(?!\d)", query)
+        normalized_query = self.arabic_to_english_digits(query)
+
+        numbers = re.findall(
+            r"(?<!\d)\d+(?!\d)",
+            normalized_query
+        )
 
         if not numbers:
             return []
@@ -586,35 +640,40 @@ class PGVectorProvider(VectorDBInterface):
 
                 for index, number in enumerate(numbers):
 
-                    param_name = f"number_{index}"
+                    param_name_en = f"number_en_{index}"
+                    param_name_ar = f"number_ar_{index}"
+
+                    arabic_number = self.english_to_arabic_digits(number)
 
                     numeric_conditions.append(
                         f"""
-                        {PgVectorTableSchemeEnums.TEXT.value}
-                        ~ ('(^|[^0-9])' || :{param_name} || '([^0-9]|$)')
+                        (
+                            {PgVectorTableSchemeEnums.TEXT.value}
+                            ~ ('(^|[^0-9])' || :{param_name_en} || '([^0-9]|$)')
+                        )
+                        OR
+                        (
+                            {PgVectorTableSchemeEnums.TEXT.value}
+                            ~ ('(^|[^٠-٩])' || :{param_name_ar} || '([^٠-٩]|$)')
+                        )
                         """
                     )
 
-                    params[param_name] = number
+                    params[param_name_en] = number
+                    params[param_name_ar] = arabic_number
 
                 conditions.append(
                     "(" + " OR ".join(numeric_conditions) + ")"
                 )
 
                 # Metadata filters
-                if filters:
-                    for index, (key, value) in enumerate(filters.items()):
-
-                        if key not in FILTERABLE_METADATA:
-                            continue
-
-                        param_name = f"filter_{index}"
-
-                        conditions.append(
-                            f"metadata->>'{key}' = :{param_name}"
-                        )
-
-                        params[param_name] = str(value)
+                conditions.extend(
+                    self._build_metadata_filters(
+                        filters=filters,
+                        params=params,
+                        param_prefix="numeric_filter",
+                    )
+                )
 
                 where_clause = " AND ".join(conditions)
 
@@ -628,8 +687,16 @@ class PGVectorProvider(VectorDBInterface):
                     score_expressions.append(
                         f"""
                         CASE
-                            WHEN {PgVectorTableSchemeEnums.TEXT.value}
-                            ~ ('(^|[^0-9])' || :{param_name} || '([^0-9]|$)')
+                            WHEN
+                                (
+                                    {PgVectorTableSchemeEnums.TEXT.value}
+                                    ~ ('(^|[^0-9])' || :number_en_{index} || '([^0-9]|$)')
+                                )
+                                OR
+                                (
+                                    {PgVectorTableSchemeEnums.TEXT.value}
+                                    ~ ('(^|[^٠-٩])' || :number_ar_{index} || '([^٠-٩]|$)')
+                                )
                             THEN 1
                             ELSE 0
                         END

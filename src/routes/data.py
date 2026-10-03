@@ -92,7 +92,7 @@ async def upload_data(request: Request, project_id: int, file: UploadFile,
 async def process_endpoint(request: Request, project_id: int, process_request: ProcessRequest):
 
      
-     process_controller = ProcessController(project_id=project_id, vision_model=request.app.vision_model)
+     process_controller = ProcessController(project_id=project_id, vision_model=request.app.vision_client)
      do_reset = process_request.do_reset
 
      project_model = await ProjectModel.create_instance(

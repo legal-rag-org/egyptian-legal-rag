@@ -2,7 +2,7 @@ from .BaseController import BaseController
 from .ProjectController import ProjectController
 import os
 from langchain_community.document_loaders import TextLoader
-from .loaders import OCRPDFLoader, PDFTableDetector, TableLoader
+from .loaders import OCRPDFLoader, PDFTableDetector, TableLoader, PDFTextLayerLoader
 import re
 from models import ProcessingEnum
 from .enums.nlp import ProcessControllerEnums
@@ -46,7 +46,7 @@ class ProcessController(BaseController):
             return TextLoader(file_path, encoding="utf-8")
 
         elif file_ext == ProcessingEnum.PDF.value:
-            return OCRPDFLoader(file_path)
+            return PDFTextLayerLoader(file_path)
 
         return None
 
@@ -92,13 +92,68 @@ class ProcessController(BaseController):
                 overlap_size=overlap_size
             )
 
-    def process_text(
-    self,
-    file_id: str,
-    chunk_size: int = 1000,
-    overlap_size: int = 100
-):
+    def split_by_article_marker(self, text: str):
+        pattern = re.compile(
+            r'(?im)^\s*'
+            r'\(?\s*'
+            r'(?:المادة|الماده|مادة|ماده)'
+            r'\s*'
+            r'(?:رقم\s*)?'
+            r'(?:'
+                r'\(\s*([0-9٠-٩۰-۹]+)\s*\)'
+                r'|'
+                r'([0-9٠-٩۰-۹]+)'
+                r'|'
+                r'(الأولى|الأولي|الثانية|الثانيه|الثالثة|الثالثه|'
+                r'الرابعة|الرابعه|الخامسة|الخامسه|السادسة|السادسه|'
+                r'السابعة|السابعه|الثامنة|الثامنه|التاسعة|التاسعه|'
+                r'العاشرة|العاشره)'
+            r')'
+            r'\s*\)?'
+            r'\s*:?\s*$'
+        )
 
+        matches = list(pattern.finditer(text))
+
+        if not matches:
+            return []
+
+        chunks = []
+
+        for index, match in enumerate(matches):
+
+            article_number = (
+                match.group(1)
+                or match.group(2)
+                or match.group(3)
+            )
+
+            start = match.start()
+
+            end = (
+                matches[index + 1].start()
+                if index + 1 < len(matches)
+                else len(text)
+            )
+
+            chunk_text = text[start:end].strip()
+
+            if chunk_text:
+                chunks.append(
+                    (
+                        article_number,
+                        chunk_text
+                    )
+                )
+
+        return chunks
+
+    def process_text(
+        self,
+        file_id: str,
+        chunk_size: int = 1000,
+        overlap_size: int = 100
+    ):
         base_metadata = ProcessControllerEnums.base_metadata.value
 
         file_content = self.get_file_content(
@@ -113,7 +168,7 @@ class ProcessController(BaseController):
 
         documents = []
 
-        for idx, page in enumerate(file_content):
+        for page in file_content:
 
             text = self.normalize_text(
                 text=page.page_content
@@ -122,38 +177,40 @@ class ProcessController(BaseController):
             if not text:
                 continue
 
-            page_metadata = {
-                **base_metadata,
-                "page": idx + 1,
-                "content_type": "table",
-            }
+            articles = self.split_by_article_marker(text)
 
+            for article_number, article_text in articles:
 
+                metadata = {
+                    **base_metadata,
+                    "article": str(article_number),
+                    "content_type": "text",
+                }
 
-            sections = self.split_by_official_gazette(text)
+                if len(article_text) <= chunk_size:
 
-            page_documents = []
-
-            for section_title, section_text in sections:
-
-                section_metadata = page_metadata.copy()
-                section_metadata["gazette_issue"] = section_title
-
-                section_chunks = self._chunk_gazette_section(
-                    section_title=section_title,
-                    section_text=section_text,
-                    chunk_size=chunk_size,
-                )
-
-                for chunk in section_chunks:
-                    page_documents.append(
+                    documents.append(
                         Document(
-                            page_content=chunk,
-                            metadata=section_metadata.copy(),
+                            page_content=article_text.strip(),
+                            metadata=metadata.copy()
                         )
                     )
 
-            documents.extend(page_documents)
+                else:
+
+                    chunks = self._sliding_window(
+                        article_text,
+                        chunk_size,
+                        overlap_size
+                    )
+
+                    for chunk in chunks:
+                        documents.append(
+                            Document(
+                                page_content=chunk.strip(),
+                                metadata=metadata.copy()
+                            )
+                        )
 
         return documents
 
@@ -329,55 +386,93 @@ class ProcessController(BaseController):
         return chunks
 
     def process_section_aware_splitter(
-            self,
-            text: str,
-            metadata: dict,
-            chunk_size: int,
-            overlap_size: int
+        self,
+        text,
+        metadata,
+        chunk_size,
+        overlap_size
     ):
-
-        self.logger.info("start split_by_articles")
-
         sections = self.split_by_articles(text)
 
         chunks = []
-        self.logger.info("end split_by_articles")
-
-        self.logger.info("start loop sections")
 
         for article_num, article_text in sections:
 
-            article_text = article_text.strip()
-
-            if not article_text:
+            if not article_text.strip():
                 continue
 
             article_metadata = metadata.copy()
             article_metadata["article"] = article_num
 
+            # Article header
+            article_match = re.match(
+                r"(?:مادة|ﻣﺎﺩﺓ)"
+                r"\s*\("
+                r"\s*[0-9٠-٩۰-۹]+\s*"
+                r"\)"
+                r"\s*:?",
+                article_text
+            )
+
+            if article_match:
+                article_header = article_match.group().strip()
+
+                article_content = article_text[
+                    article_match.end():
+                ].strip()
+
+            else:
+                article_header = ""
+
+                article_content = article_text
+
+            # Split ONLY the article if it is too large
             article_chunks = self.split_large_section(
-                text=article_text,
+                text=article_content,
                 chunk_size=chunk_size,
                 overlap_size=overlap_size
             )
 
             for chunk in article_chunks:
 
+                chunk_text = (
+                    f"{article_header}\n{chunk}"
+                    if article_header
+                    else chunk
+                )
+
                 chunks.append(
                     Document(
-                        page_content=chunk,
+                        page_content=chunk_text,
                         metadata=article_metadata.copy()
                     )
                 )
 
-        self.logger.info("end loop sections")
-
         return chunks
+
+
+    def normalize_digits(self, text: str) -> str:
+
+        translation = str.maketrans(
+            "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹",
+            "01234567890123456789"
+        )
+
+        return text.translate(translation)
 
 
     def split_by_articles(self, text: str):
 
-        pattern = r"(?=مادة\s*(?:\(\s*)?[0-9٠-٩]+\s*(?:\))?\s*:?)"
+        pattern = (
+            r"(?:مادة|ﻣﺎﺩﺓ)"
+            r"\s*"
+            r"\("
+            r"\s*"
+            r"([0-9٠-٩۰-۹]+)"
+            r"\s*"
+            r"\)"
+            r"\s*:"
+        )
 
         matches = list(
             re.finditer(
@@ -388,24 +483,27 @@ class ProcessController(BaseController):
         )
 
         if not matches:
-            return [
-                ("unknown", text)
-            ]
+            return [("unknown", text)]
 
         sections = []
 
         for index, match in enumerate(matches):
 
+            article_number = self.normalize_digits(
+                match.group(1)
+            )
+
             start = match.start()
 
-            if index + 1 < len(matches):
-                end = matches[index + 1].start()
-            else:
-                end = len(text)
+            end = (
+                matches[index + 1].start()
+                if index + 1 < len(matches)
+                else len(text)
+            )
 
-            article_text = text[start:end].strip()
-
-            article_number = match.group().strip()
+            article_text = text[
+                start:end
+            ].strip()
 
             sections.append(
                 (
@@ -484,11 +582,13 @@ class ProcessController(BaseController):
 ):
 
         base_metadata = {
-            "source": "قانون التأمينات الاجتماعية والمعاشات رقم 148 لسنة 2019",
+            "domain": "insurance",
+            "source": "قانون العمل الجديد رقم 148 لسنة 2019",
             "document_type": "law",
             "law_number": "148",
             "law_year": "2019",
             "language": "ar",
+            "file_url": "https://www.nosi.gov.eg/ar/Lists/NOSILibrary/2-12-2019%20%D9%83%D8%AA%D8%A7%D8%A8%20%D8%A7%D9%84%D9%82%D8%A7%D9%86%D9%88%D9%86%20%D8%A7%D9%84%D8%AC%D8%AF%D9%8A%D8%AF.pdf",
         }
 
         file_path = os.path.join(
@@ -506,13 +606,16 @@ class ProcessController(BaseController):
             f"Detected table pages: {table_pages}"
         )
 
-        ocr_loader = OCRPDFLoader(
+        ocrloader = OCRPDFLoader(
             file_path=file_path,
-            excluded_pages=table_pages
+            excluded_pages=table_pages,
         )
 
-        normal_documents = ocr_loader.load()
-        self.logger.info(f"number of normal docs {len(normal_documents)}")
+        normal_documents = ocrloader.load()
+
+        self.logger.info(
+            f"Number of normal docs: {len(normal_documents)}"
+        )
 
         table_loader = TableLoader(
             file_path=file_path,
@@ -521,65 +624,65 @@ class ProcessController(BaseController):
 
         table_documents = []
 
-        # Process each table page individually
+         # Process each table page individually
         for page_number in table_pages:
 
-             image_path = None
+              image_path = None
 
-             try:
+              try:
 
-                 self.logger.info(
-                     f"Starting vision page: {page_number}"
-                 )
+                  self.logger.info(
+                      f"Starting vision page: {page_number}"
+                  )
 
-                 image_path = table_loader.render_page(
-                     page_number=page_number
-                 )
+                  image_path = table_loader.render_page(
+                      page_number=page_number
+                  )
 
-                 self.logger.info(
-                     f"Rendered page: {page_number}"
-                 )
+                  self.logger.info(
+                      f"Rendered page: {page_number}"
+                  )
 
-                 texts = await self.vision_model.extract(
-                     images=[image_path]
-                 )
+                  texts = await self.vision_model.extract(
+                      images=[image_path]
+                  )
 
-                 text = texts[0] if texts else ""
+                  text = texts[0] if texts else ""
 
-                 self.logger.info(
-                     f"Vision extraction finished for page: {page_number}"
-                 )
+                  self.logger.info(
+                      f"Vision extraction finished for page: {page_number}"
+                  )
 
-                 if not text.strip():
-                     continue
+                  if not text.strip():
+                      continue
 
-                 table_documents.append(
-                   Document(
-                         page_content=text,
-                         metadata={
-                             **base_metadata,
-                             "page": page_number,
-                             "content_type": "table",
-                         },
-                     )
-                 )
+                  table_documents.append(
+                    Document(
+                          page_content=text,
+                          metadata={
+                              **base_metadata,
+                              "page": page_number,
+                              "content_type": "table",
+                          },
+                      )
+                  )
 
-             except Exception as e:
+              except Exception as e:
 
-                 self.logger.error(
-                     f"Error processing page {page_number}: {e}",
-                     exc_info=True,
-                 )
+                  self.logger.error(
+                      f"Error processing page {page_number}: {e}",
+                      exc_info=True,
+                  )
 
-             finally:
+              finally:
 
-                 if image_path and os.path.exists(image_path):
-                     os.unlink(image_path)
+                  if image_path and os.path.exists(image_path):
+                      os.unlink(image_path)
 
-        # 4. Process normal text
+         # 4. Process normal text
         documents = []
 
-        for idx, page in enumerate(normal_documents):
+        for page in normal_documents:
 
             text = self.normalize_text(
                 page.page_content
@@ -593,7 +696,7 @@ class ProcessController(BaseController):
                     text=text,
                     metadata={
                         **base_metadata,
-                        "page": idx+1,
+                        "page": page.metadata["page"],
                     },
                     chunk_size=chunk_size,
                     overlap_size=overlap_size
@@ -606,4 +709,3 @@ class ProcessController(BaseController):
         documents.extend(table_documents)
 
         return documents
-    

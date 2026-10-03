@@ -10,16 +10,18 @@ class ProcessControllerEnums(Enum):
     )
 
     base_metadata = {
-        "source": "قانون التأمينات الاجتماعية والمعاشات رقم 148 لسنة 2019",
+        "source": "قانون رقم 207 لسنة 2020 بإصدار قانون الجمارك محدثًا حتى عام 2024",
+        "domain": "customs",
         "document_type": "law",
-        "law_number": "148",
-        "law_year": "2019",
+        "law_number": "207",
+        "law_year": "2020",
         "language": "ar",
     }
 
     ALLOWED_METADATA_VALUES = {
-        "law_number": {"148"},
-        "law_year": {"2019"},
+        "law_number": {"148", "14", "91", "67", "81", "159", "207", "187"},
+        "law_year": {"2019", "2025", "2005", "2016", "1981", "2020", "2023"},
+        "domain" : {"insurance", "labour", "tax", "civil_service", "companies", "customs", "reconciliation"}
     }
 
     PORMPT_INJUCTED_ANSWER = "عذرًا، لا يمكنني معالجة هذا الطلب."
