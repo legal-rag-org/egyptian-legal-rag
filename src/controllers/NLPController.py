@@ -174,23 +174,47 @@ class NLPController(BaseController):
         return results
 
     def validate_metadata_filters(
-    self,
-    filters: dict,
-    allowed_values: dict,
-) -> dict:
+        self,
+        filters: dict,
+        allowed_values: dict,
+    ) -> dict:
 
         if not isinstance(filters, dict):
             return {}
+
+        validated_filters = {}
 
         for field, value in filters.items():
 
             if field not in allowed_values:
                 return {}
 
-            if value not in allowed_values[field]:
+            allowed = allowed_values[field]
+
+            # Single value
+            if isinstance(value, str):
+                if value not in allowed:
+                    return {}
+
+                validated_filters[field] = value
+
+            # Multiple values
+            elif isinstance(value, list):
+                if not value:
+                    return {}
+
+                if not all(
+                    isinstance(item, str) and item in allowed
+                    for item in value
+                ):
+                    return {}
+
+                validated_filters[field] = value
+
+            else:
                 return {}
 
-        return filters
+        return validated_filters
 
     async def search_hybrid(
         self,
