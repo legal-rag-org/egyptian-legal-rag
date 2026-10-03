@@ -134,90 +134,548 @@ vision_table_extractor_prompt = Template("\n".join([
 
 
 metadata_filter_extractor_prompt = Template("\n".join([
-    "You are a metadata filter extraction system for a Retrieval-Augmented Generation (RAG) system.",
-    "",
-    "Your ONLY task is to extract metadata filters that are explicitly mentioned in the user's query.",
-    "",
-    "Available metadata fields:",
-    "$available_fields",
-    "",
-    "STRICT RULES:",
-    "1. Use ONLY field names that exist in the available metadata fields.",
-    "2. Extract a filter ONLY if its value is explicitly written or clearly stated in the user's query.",
-    "3. NEVER infer, assume, guess, or derive a metadata value from:",
-    "   - general knowledge",
-    "   - the topic of the question",
-    "   - the name of the law",
-    "   - the context of the conversation",
-    "   - the documents",
-    "   - common/default values",
-    "   - previous messages",
-    "4. In particular:",
-    "   - Do NOT add `law_number` unless a law number is explicitly mentioned.",
-    "   - Do NOT add `law_year` unless a year is explicitly mentioned.",
-    "   - The phrase \"قانون التأمينات الاجتماعية والمعاشات\" alone does NOT mean `law_number = 148`.",
-    "   - The phrase \"قانون التأمينات الاجتماعية والمعاشات\" alone does NOT mean `law_year = 2019`.",
-    "5. Do not return values such as \"unknown\", \"undefined\", \"not specified\", or null when a field value is not explicitly mentioned.",
-    "6. If the query contains NO explicit metadata values, return an empty filters object.",
-    "7. Preserve the exact value mentioned by the user whenever possible without reinterpreting or rewriting it.",
-    "8. Return ONLY valid JSON. NEVER use Markdown code blocks (do NOT wrap in ```json or ```). Do NOT include any explanations or extra text.",
-    "",
-    "Output format:",
-    "{",
-    "  \"filters\": {}",
-    "}",
-    "",
-    "Examples:",
-    "",
-    "User query:",
-    "\"ما هي شروط استحقاق المعاش؟\"",
-    "Output:",
-    "{\"filters\": {}}",
-    "",
-    "User query:",
-    "\"ما هي المادة 5 من القانون؟\"",
-    "Output:",
-    "{\"filters\": {}}",
-    "",
-    "User query:",
-    "\"ما هي أحكام القانون رقم 148؟\"",
-    "Output:",
-    "{\"filters\": {\"law_number\": \"148\"}}",
-    "",
-    "User query:",
-    "\"ما هي أحكام القانون رقم 148 لسنة 2019؟\"",
-    "Output:",
-    "{\"filters\": {\"law_number\": \"148\", \"law_year\": \"2019\"}}",
-    "",
-    "User query:",
-    "\"ما هي أحكام القانون رقم 145؟\"",
-    "Output:",
-    "{\"filters\": {\"law_number\": \"145\"}}",
-    "",
-    "User query:",
-    "\"ما هي أحكام القانون لسنة 2020؟\"",
-    "Output:",
-    "{\"filters\": {\"law_year\": \"2020\"}}",
-    "",
-    "User query:",
-    "\"ما هو قانون التأمينات الاجتماعية والمعاشات؟\"",
-    "Output:",
-    "{\"filters\": {}}",
-    "",
-    "User query:",
-    "\"ما هي شروط معاش العجز؟\"",
-    "Output:",
-    "{\"filters\": {}}",
-    "",
-    "User query:",
-    "\"المادة 5 من قانون 148 لسنة 2019\"",
-    "Output:",
-    "{\"filters\": {\"law_number\": \"148\", \"law_year\": \"2019\", \"article\": \"5\"}}",
-    "",
-    "User query:",
-    "$query",
-]))
 
+    "You are a metadata filter extraction assistant for an Egyptian legal RAG system.",
+
+    "",
+
+    "Your task is to extract metadata filters from the user's question.",
+
+    "",
+
+    "Available metadata fields:",
+
+    "$available_fields",
+
+    "",
+
+    "Allowed domain values:",
+
+    "- insurance",
+
+    "- labour",
+
+    "- tax",
+
+    "- companies",
+
+    "- civil_service",
+
+    "- customs",
+
+    "",
+
+    "Domain classification rules:",
+
+    "",
+
+    "1. insurance",
+
+    "Use 'insurance' for questions related to social insurance and pensions, including:",
+
+    "- Social insurance",
+
+    "- Pensions",
+
+    "- Social security",
+
+    "- Insured persons and pensioners",
+
+    "- Pension eligibility and requirements",
+
+    "- Old-age, disability, and death pensions",
+
+    "- Insurance contributions and insurance periods",
+
+    "- Work injuries when discussed in the social insurance context",
+
+    "- Insurance compensation",
+
+    "- National Organization for Social Insurance",
+
+    "- Social Insurance and Pensions Law No. 148 of 2019",
+
+    "",
+
+    "2. labour",
+
+    "Use 'labour' for questions related to employment and labour law, including:",
+
+    "- Labour law",
+
+    "- Employment relationships",
+
+    "- Workers and employers",
+
+    "- Employment contracts",
+
+    "- Wages and minimum wage in the labour-law context",
+
+    "- Leave and working hours",
+
+    "- Overtime",
+
+    "- Dismissal and termination",
+
+    "- Resignation",
+
+    "- Probation",
+
+    "- Employment rights and obligations",
+
+    "- Labour Law No. 14 of 2025",
+
+    "",
+
+    "3. tax",
+
+    "Use 'tax' for questions related to Egyptian taxes, including:",
+
+    "- Income tax",
+
+    "- Value Added Tax (VAT)",
+
+    "- Sales tax",
+
+    "- Corporate taxes",
+
+    "- Taxes on individuals and legal entities",
+
+    "- Tax returns",
+
+    "- Tax registration",
+
+    "- Egyptian Tax Authority",
+
+    "- Tax offices",
+
+    "- Tax examination and assessment",
+
+    "- Tax collection",
+
+    "- Withholding tax",
+
+    "- Stamp tax",
+
+    "- Tax exemptions",
+
+    "- Deductible costs",
+
+    "- Income Tax Law No. 91 of 2005",
+
+    "- VAT Law No. 67 of 2016",
+
+    "- Stamp Tax Law",
+
+    "",
+
+    "4. companies",
+
+    "Use 'companies' for questions related to companies and corporate law, including:",
+
+    "- Companies and company formation",
+
+    "- Company establishment and registration",
+
+    "- Companies Law",
+
+    "- Companies Law No. 159 of 1981",
+
+    "- Joint-stock companies",
+
+    "- Limited liability companies",
+
+    "- One-person companies",
+
+    "- Partners and shareholders",
+
+    "- Shares and capital",
+
+    "- Increasing or reducing capital",
+
+    "- General assemblies",
+
+    "- Boards of directors",
+
+    "- Company management",
+
+    "- Auditors",
+
+    "- Liquidation and dissolution",
+
+    "- Mergers",
+
+    "- Foreign companies and branches",
+
+    "- Corporate governance",
+
+    "- GAFI in the context of company formation and regulation",
+
+    "",
+
+    "5. civil_service",
+
+    "Use 'civil_service' for questions related to Egyptian civil service and government employees, including:",
+
+    "- Civil service",
+
+    "- Civil Service Law",
+
+    "- Civil Service Law No. 81 of 2016",
+
+    "- Public employees and government employees",
+
+    "- Administrative bodies",
+
+    "- Government positions",
+
+    "- Appointment and employment requirements in government positions",
+
+    "- Promotion",
+
+    "- Functional wage and complementary wage",
+
+    "- Allowances",
+
+    "- Government employee leave",
+
+    "- Annual and sick leave",
+
+    "- Performance evaluation",
+
+    "- Disciplinary penalties",
+
+    "- Investigations",
+
+    "- Termination",
+
+    "- Retirement age",
+
+    "- Transfer",
+
+    "- Secondment",
+
+    "- Delegation",
+
+    "- Resignation",
+
+    "- Public employee rights and obligations",
+
+    "- The latest amendments to the Civil Service Law",
+
+    "",
+
+    "6. customs",
+
+    "Use 'customs' for questions related to Egyptian customs and customs law, including:",
+
+    "- Customs",
+
+    "- Customs duties and customs tariffs",
+
+    "- Customs clearance",
+
+    "- Import and export customs procedures",
+
+    "- Imported and exported goods",
+
+    "- Customs declarations",
+
+    "- Customs valuation",
+
+    "- Customs exemptions",
+
+    "- Customs fees and charges",
+
+    "- Customs penalties and violations",
+
+    "- Customs offices and customs authorities",
+
+    "- Customs warehouses",
+
+    "- Temporary admission",
+
+    "- Transit customs procedures",
+
+    "- Smuggling when discussed in the customs-law context",
+
+    "- Import and export restrictions related to customs",
+
+    "- Customs Law No. 207 of 2020",
+
+    "- Law No. 207 of 2020 issuing the Customs Law",
+
+    "",
+    "",
+    "7. reconciliation",
+    "Use 'reconciliation' for questions related to the settlement and legalization of certain building violations in Egypt, including:",
+    "- Reconciliation of certain building violations",
+    "- Settlement of building violations",
+    "- Legalization of certain building violations",
+    "- Applications for reconciliation of building violations",
+    "- Eligibility conditions for reconciliation",
+    "- Reconciliation procedures",
+    "- Required documents for reconciliation",
+    "- Reconciliation fees and payments",
+    "- Reconciliation committees",
+    "- Inspection and examination of building violations",
+    "- Acceptance or rejection of reconciliation applications",
+    "- Consequences of accepting or rejecting reconciliation",
+    "- Building violations covered by reconciliation",
+    "- Building violations excluded from reconciliation",
+    "- Law regulating reconciliation in certain building violations",
+    "- Law No. 17 of 2019 regarding reconciliation in certain building violations",
+    "- Law No. 187 of 2023 regarding reconciliation in certain building violations",
+    "",
+
+    "Important extraction rules:",
+
+    "",
+
+    "1. Only use the available metadata field names listed above.",
+
+    "",
+
+    "2. The 'domain' can be inferred from the topic of the question even if the user does not explicitly mention the domain.",
+
+    "",
+
+    "3. The 'domain' field MUST ALWAYS be a list of strings.",
+
+    "",
+
+    "4. If the question belongs to one domain, return a list containing exactly one domain value.",
+
+    "",
+
+    "5. If the question clearly relates to multiple legal domains, include all relevant domains in the list.",
+
+    "",
+
+    "6. Do not omit a relevant domain just because another domain is also present.",
+
+    "",
+
+    "7. Do not include unrelated domains.",
+
+    "",
+
+    "8. Set 'law_number' ONLY when the user explicitly mentions a law number.",
+
+    "",
+
+    "9. Set 'law_year' ONLY when the user explicitly mentions a law year.",
+
+    "",
+
+    "10. If the user mentions a specific law by name, you may infer the domain from that law.",
+
+    "    However, do NOT infer law_number or law_year unless they are explicitly mentioned in the question.",
+
+    "",
+
+    "11. Preserve law_number and law_year exactly as stated by the user.",
+
+    "",
+
+    "12. Do not return 'unknown', 'undefined', 'not specified', or null values.",
+
+    "",
+
+    "13. If a metadata field cannot be determined, omit that field.",
+
+    "",
+
+    "14. If the question is clearly unrelated to all available domains, omit the domain.",
+
+    "",
+
+    "15. Return valid JSON only.",
+
+    "",
+
+    "16. Do not include Markdown, explanations, comments, or additional text outside the JSON.",
+
+    "",
+
+    "Few-shot examples:",
+
+    "",
+
+    "Example 1:",
+
+    'User question: "ما هي شروط استحقاق المعاش؟"',
+
+    'Output: {"filters": {"domain": ["insurance"]}}',
+
+    "",
+
+    "Example 2:",
+
+    'User question: "ما هي نسبة اشتراكات التأمينات الاجتماعية؟"',
+
+    'Output: {"filters": {"domain": ["insurance"]}}',
+
+    "",
+
+    "Example 3:",
+
+    'User question: "ما هي حقوق العامل في الإجازات؟"',
+
+    'Output: {"filters": {"domain": ["labour"]}}',
+
+    "",
+
+    "Example 4:",
+
+    'User question: "ما هي شروط إنهاء عقد العمل؟"',
+
+    'Output: {"filters": {"domain": ["labour"]}}',
+
+    "",
+
+    "Example 5:",
+
+    'User question: "ما هي ضريبة الدخل على الأشخاص الطبيعيين؟"',
+
+    'Output: {"filters": {"domain": ["tax"]}}',
+
+    "",
+
+    "Example 6:",
+
+    'User question: "ما هو قانون الضريبة على القيمة المضافة رقم 67 لسنة 2016؟"',
+
+    'Output: {"filters": {"domain": ["tax"], "law_number": "67", "law_year": "2016"}}',
+
+    "",
+
+    "Example 7:",
+
+    'User question: "ما هي شروط تأسيس الشركة؟"',
+
+    'Output: {"filters": {"domain": ["companies"]}}',
+
+    "",
+
+    "Example 8:",
+
+    'User question: "ما هي أحكام زيادة رأس مال الشركة في قانون 159 لسنة 1981؟"',
+
+    'Output: {"filters": {"domain": ["companies"], "law_number": "159", "law_year": "1981"}}',
+
+    "",
+
+    "Example 9:",
+
+    'User question: "ما هي شروط التعيين في الوظائف الحكومية؟"',
+
+    'Output: {"filters": {"domain": ["civil_service"]}}',
+
+    "",
+
+    "Example 10:",
+
+    'User question: "ما هي الإجازات المقررة للموظف الحكومي في قانون 81 لسنة 2016؟"',
+
+    'Output: {"filters": {"domain": ["civil_service"], "law_number": "81", "law_year": "2016"}}',
+
+    "",
+
+    "Example 11:",
+
+    'User question: "ما هي إجراءات التخليص الجمركي على البضائع المستوردة؟"',
+
+    'Output: {"filters": {"domain": ["customs"]}}',
+
+    "",
+
+    "Example 12:",
+
+    'User question: "ما هي الرسوم الجمركية على البضائع المستوردة؟"',
+
+    'Output: {"filters": {"domain": ["customs"]}}',
+
+    "",
+
+    "Example 13:",
+
+    'User question: "ما هي إجراءات الإفراج الجمركي؟"',
+
+    'Output: {"filters": {"domain": ["customs"]}}',
+
+    "",
+
+    "Example 14:",
+
+    'User question: "ما هي أحكام قانون الجمارك رقم 207 لسنة 2020؟"',
+
+    'Output: {"filters": {"domain": ["customs"], "law_number": "207", "law_year": "2020"}}',
+
+    "",
+
+    "Example 15:",
+
+    'User question: "ما هي حالات الإعفاء من الرسوم الجمركية في قانون 207 لسنة 2020؟"',
+
+    'Output: {"filters": {"domain": ["customs"], "law_number": "207", "law_year": "2020"}}',
+
+    "",
+
+    "Example 16:",
+
+    'User question: "ما هي الضرائب والرسوم الجمركية على البضائع المستوردة؟"',
+
+    'Output: {"filters": {"domain": ["tax", "customs"]}}',
+
+    "",
+
+    "Example 17:",
+
+    'User question: "ما هي ضريبة القيمة المضافة وإجراءات التخليص الجمركي على السلع المستوردة؟"',
+
+    'Output: {"filters": {"domain": ["tax", "customs"]}}',
+
+    "",
+
+    "Example 18:",
+
+    'User question: "ما هي حقوق العامل والتعويض المستحق له في حالة إصابة العمل؟"',
+
+    'Output: {"filters": {"domain": ["labour", "insurance"]}}',
+
+    "",
+
+    "",
+    "Example 19:",
+    'User question: "ما هي شروط التصالح في مخالفات البناء؟"',
+    'Output: {"filters": {"domain": ["reconciliation"]}}',
+
+    "",
+    "Example 20:",
+    'User question: "ما هي إجراءات تقديم طلب التصالح في مخالفات البناء؟"',
+    'Output: {"filters": {"domain": ["reconciliation"]}}',
+
+    "",
+    "Example 21:",
+    'User question: "ما هي المستندات المطلوبة للتصالح في مخالفات البناء؟"',
+    'Output: {"filters": {"domain": ["reconciliation"]}}',
+
+    "",
+    "Example 22:",
+    'User question: "ما هي رسوم التصالح في مخالفات البناء؟"',
+    'Output: {"filters": {"domain": ["reconciliation"]}}',
+
+    "",
+    "Example 23:",
+    'User question: "ما هي حالات رفض طلب التصالح في مخالفات البناء؟"',
+    'Output: {"filters": {"domain": ["reconciliation"]}}',
+
+    "User question:",
+
+    "$query",
+
+]))
 
 summary_memory_prompt = Template("\n".join([
     "You are a conversation memory summarizer for a Retrieval-Augmented Generation (RAG) system.",
