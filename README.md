@@ -1,6 +1,17 @@
-# insurance-pension-rag
+# egyptian-legal-rag
 
-An intelligent RAG-based assistant for social insurance and pension information, providing accurate answers from trusted sources.
+An intelligent RAG-based assistant for Egyptian legal information, providing accurate answers from trusted sources.
+
+## Supported Domains
+
+- Social Insurance & Pensions
+- Labour Law
+- Tax Law
+- Companies Law
+- Civil Service Law
+- Customs Law
+- Reconciliation of Building Violations
+
 
 ## Requirements
 
