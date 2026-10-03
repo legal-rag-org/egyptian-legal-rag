@@ -26,8 +26,8 @@ uv --version
 ### Clone the repository
 
 ```bash
-git clone https://github.com/Ahmed-KKhaled/insurance-pension-rag.git
-cd insurance-pension-rag
+git clone https://github.com/Ahmed-KKhaled/egyptian-legal-rag.git
+cd egyptian-legal-rag
 ```
 
 ### Create the virtual environment and install dependencies
