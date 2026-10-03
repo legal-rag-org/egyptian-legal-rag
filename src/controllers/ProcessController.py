@@ -624,62 +624,62 @@ class ProcessController(BaseController):
 
         table_documents = []
 
-        # # Process each table page individually
-        # for page_number in table_pages:
+         # Process each table page individually
+        for page_number in table_pages:
 
-        #      image_path = None
+              image_path = None
 
-        #      try:
+              try:
 
-        #          self.logger.info(
-        #              f"Starting vision page: {page_number}"
-        #          )
+                  self.logger.info(
+                      f"Starting vision page: {page_number}"
+                  )
 
-        #          image_path = table_loader.render_page(
-        #              page_number=page_number
-        #          )
+                  image_path = table_loader.render_page(
+                      page_number=page_number
+                  )
 
-        #          self.logger.info(
-        #              f"Rendered page: {page_number}"
-        #          )
+                  self.logger.info(
+                      f"Rendered page: {page_number}"
+                  )
 
-        #          texts = await self.vision_model.extract(
-        #              images=[image_path]
-        #          )
+                  texts = await self.vision_model.extract(
+                      images=[image_path]
+                  )
 
-        #          text = texts[0] if texts else ""
+                  text = texts[0] if texts else ""
 
-        #          self.logger.info(
-        #              f"Vision extraction finished for page: {page_number}"
-        #          )
+                  self.logger.info(
+                      f"Vision extraction finished for page: {page_number}"
+                  )
 
-        #          if not text.strip():
-        #              continue
+                  if not text.strip():
+                      continue
 
-        #          table_documents.append(
-        #            Document(
-        #                  page_content=text,
-        #                  metadata={
-        #                      **base_metadata,
-        #                      "page": page_number,
-        #                      "content_type": "table",
-        #                  },
-        #              )
-        #          )
+                  table_documents.append(
+                    Document(
+                          page_content=text,
+                          metadata={
+                              **base_metadata,
+                              "page": page_number,
+                              "content_type": "table",
+                          },
+                      )
+                  )
 
-        #      except Exception as e:
+              except Exception as e:
 
-        #          self.logger.error(
-        #              f"Error processing page {page_number}: {e}",
-        #              exc_info=True,
-        #          )
+                  self.logger.error(
+                      f"Error processing page {page_number}: {e}",
+                      exc_info=True,
+                  )
 
-        #      finally:
+              finally:
 
-        #          if image_path and os.path.exists(image_path):
-        #              os.unlink(image_path)
+                  if image_path and os.path.exists(image_path):
+                      os.unlink(image_path)
 
-        # 4. Process normal text
+         # 4. Process normal text
         documents = []
 
         for page in normal_documents:
