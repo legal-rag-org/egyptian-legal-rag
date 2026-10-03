@@ -4,6 +4,7 @@ from uuid import UUID
 
 class PushRequest(BaseModel):
     do_reset: Optional[int] = 0
+    asset_id: int | None = None
 
 class SearchRequest(BaseModel):
     text: str
