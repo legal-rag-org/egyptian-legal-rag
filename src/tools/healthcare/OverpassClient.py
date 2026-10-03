@@ -42,7 +42,7 @@ class OverpassClient:
         """
 
         headers = {
-            "User-Agent": "insurance-pension-rag/1.0",
+            "User-Agent": "egyptian-legal-rag/1.0",
             "Accept": "application/json",
         }
 
