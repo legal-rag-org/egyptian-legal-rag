@@ -582,13 +582,13 @@ class ProcessController(BaseController):
 ):
 
         base_metadata = {
-            "domain": "insurance",
-            "source": "قانون العمل الجديد رقم 148 لسنة 2019",
+            "domain": "customs",
+            "source": "قانون الجمارك الصادر بالقانون رقم 207 لسنة 2020",
             "document_type": "law",
-            "law_number": "148",
-            "law_year": "2019",
+            "law_number": "207",
+            "law_year": "2020",
             "language": "ar",
-            "file_url": "https://www.nosi.gov.eg/ar/Lists/NOSILibrary/2-12-2019%20%D9%83%D8%AA%D8%A7%D8%A8%20%D8%A7%D9%84%D9%82%D8%A7%D9%86%D9%88%D9%86%20%D8%A7%D9%84%D8%AC%D8%AF%D9%8A%D8%AF.pdf",
+            "file_url": "https://customs.gov.eg/Upload/ECAAdminace/ECAAdminace474457860.pdf",
         }
 
         file_path = os.path.join(
@@ -606,12 +606,12 @@ class ProcessController(BaseController):
             f"Detected table pages: {table_pages}"
         )
 
-        ocrloader = OCRPDFLoader(
+        pdftextlayerloader = PDFTextLayerLoader(
             file_path=file_path,
             excluded_pages=table_pages,
         )
 
-        normal_documents = ocrloader.load()
+        normal_documents = pdftextlayerloader.load()
 
         self.logger.info(
             f"Number of normal docs: {len(normal_documents)}"
