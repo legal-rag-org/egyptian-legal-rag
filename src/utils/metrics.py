@@ -28,15 +28,15 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         return response
 
 
-    def setup_metrics(app: FastAPI):
-       """
-        Setup Prometheus metrics middleware and endpoint
-        """ 
+def setup_metrics(app: FastAPI):
+    """
+    Setup Prometheus metrics middleware and endpoint
+    """ 
 
-        # Add Prometheus middleware
-       app.add_middleware(PrometheusMiddleware)
+    # Add Prometheus middleware
+    app.add_middleware(PrometheusMiddleware)
 
-       @app.get("/TrhBVe_m5gg2005_E5VVqS", include_in_schema=False)
-       def metrics():
-            return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    @app.get("/TrhBVe_m5gg2005_E5VVqS", include_in_schema=False)
+    def metrics():
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
  
