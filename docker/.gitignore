@@ -1,2 +1,5 @@
-mongodata
-.env
+env/.env*
+
+!env/.env.*.example
+
+legalrag/alembic.ini
