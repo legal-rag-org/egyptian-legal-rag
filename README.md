@@ -113,6 +113,41 @@ The API will be available at:
 http://localhost:5000
 ```
 
+## Run the Frontend
+
+Make sure Node.js and npm are installed:
+
+```bash
+node --version
+npm --version
+```
+
+Navigate to the frontend directory:
+
+```bash
+cd frontend
+```
+
+Install the dependencies:
+
+```bash
+npm install
+```
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+The frontend will be available at the local URL displayed in your terminal, usually:
+
+```text
+http://localhost:5173
+```
+
+Make sure the FastAPI server is running before using the frontend. The frontend must also be configured to connect to the correct backend API URL.
+
 Swagger API documentation:
 
 ```text
