@@ -20,7 +20,7 @@ An intelligent RAG-based assistant for Egyptian legal information, providing acc
 
 ## How It Works
 
-The system follows a conversational Retrieval-Augmented Generation (RAG) pipeline that transforms user queries into context-aware answers grounded in relevant Egyptian legal documents.
+The system uses a conversational Retrieval-Augmented Generation (RAG) pipeline to retrieve relevant Egyptian legal documents and generate context-aware answers grounded in legal sources.
 
 ### RAG Pipeline
 
@@ -30,95 +30,57 @@ flowchart TD
     B --> C[Prompt Injection Detection]
     C --> D[Conversation Context]
     D --> E[Query Rewriting]
-    E --> F[Context Preparation]
-    F --> G[Legal Document Retrieval]
-    G --> H[Answer Generation]
-    H --> I[Citations and References]
-    I --> J[Conversation Persistence]
-    J --> K[Rolling Summary Update]
+    E --> F[Hybrid Search]
+    F --> G[Document Reranking]
+    G --> H[Top-K Selection]
+    H --> I[Citation Building]
+    I --> J[Prompt Construction]
+    J --> K[Answer Generation]
+    K --> L[Answer and Sources]
 ```
 
-### Pipeline Stages Explained
+### Pipeline Stages
 
-Suppose an Egyptian citizen wants to ask about a legal issue but submits an unclear question:
+1. **Query Processing:** Processes the user's question and incorporates relevant visual information when an image is provided.
 
-**Original query:**
+2. **Prompt Injection Detection:** Checks the processed query for potential prompt injection attempts before continuing.
 
-> أنا كنت شغال وبعدين حصل موضوع في الشغل ومش عارف آخد حقي إزاي، أعمل إيه؟
+3. **Conversation Context:** Loads previous messages and the existing conversation summary to understand follow-up questions.
 
-**1. User Query**
+4. **Query Rewriting:** Reformulates unclear or context-dependent questions using the conversation history and previous summary to improve retrieval quality.
 
-The system receives the user's question and any optional image or geographic information.
+   **Example:**
 
-At this stage, the original query is preserved as the user's actual message.
+   Original query:
 
-**2. Query Processing**
+   > أنا كنت شغال وبعدين حصل موضوع في الشغل ومش عارف آخد حقي إزاي، أعمل إيه؟
 
-The system prepares the question for downstream processing. If an image is provided, relevant visual information can be incorporated into the query.
+   If the conversation indicates that the employer terminated the contract without paying the employee's outstanding wages, the rewritten query could be:
 
-In this example, no image is provided, so the system processes the text question.
+   > ما حقوق العامل في مصر عند انتهاء علاقة العمل وعدم حصوله على الأجور المستحقة، وما الإجراءات القانونية للمطالبة بها؟
 
-**3. Prompt Injection Detection**
+   The rewritten query uses the available context to make the search more specific without assuming details that the user has not provided.
 
-The system checks whether the processed query contains a potential prompt injection attempt.
+5. **Hybrid Search:** Retrieves candidate legal passages using the configured hybrid retrieval strategy.
 
-The example question is an ordinary legal inquiry, so it can continue through the pipeline.
+6. **Document Reranking:** Reorders the retrieved passages according to their relevance to the rewritten query.
 
-**4. Conversation Context**
+7. **Top-K Selection:** Selects the highest-ranked documents to provide focused legal context for answer generation.
 
-The system loads previous messages and the existing conversation summary, if available.
+8. **Citation Building:** Extracts available source information, page numbers, and document links from the selected passages.
 
-If the user previously mentioned that their employer terminated their contract without paying their outstanding wages, this information can help clarify what they mean by "مش عارف آخد حقي".
+9. **Prompt Construction:** Combines the retrieved legal passages, their metadata, and the user's question into the generation prompt.
 
-**5. Query Rewriting**
+10. **Answer Generation:** Generates a response using the selected legal context and available conversation history.
 
-The system uses the original question, conversation history, and previous summary to reformulate the query into a clearer search request.
+11. **Answer and Sources:** Returns the generated answer, retrieved documents, applied filters, and available citations.
 
-For example, if the conversation indicates that the issue concerns unpaid wages after termination, the rewritten query might be:
+If no relevant documents are retrieved, the system returns a predefined no-answer response instead of proceeding with answer generation.
 
-> ما حقوق العامل في مصر عند انتهاء علاقة العمل وعدم حصوله على الأجور المستحقة، وما الإجراءات القانونية للمطالبة بها؟
+### Why This Approach?
 
-The rewritten query is contextual, not an assumption that should be made without supporting information from the conversation.
+Combining conversation-aware query rewriting, hybrid retrieval, and reranking helps improve the relevance of the legal evidence provided to the language model. Selecting the top-ranked passages controls the generation context, while citations help users trace answers back to their legal sources.
 
-**6. Context Preparation**
-
-The system prepares the project configuration, conversation history, and retrieval settings for the RAG agent.
-
-This determines the context and limits available to the retrieval workflow.
-
-**7. Legal Document Retrieval**
-
-The system searches the legal knowledge base for relevant Egyptian labour-law provisions concerning unpaid wages and termination of employment.
-
-The retrieved passages provide the legal context used in the next stage.
-
-**8. Answer Generation**
-
-The language model generates a response based on the retrieved legal documents.
-
-The answer should explain the relevant legal provisions and practical next steps without inventing legal information that is not supported by the available context.
-
-**9. Citations and References**
-
-The system collects available citations and source metadata so the user can verify the legal provisions supporting the answer.
-
-**10. Conversation Persistence**
-
-When an answer is available, the user's original question and the assistant's response are saved to the conversation history.
-
-This allows subsequent questions to use the earlier discussion as context.
-
-**11. Rolling Summary Update**
-
-Periodically, the system summarizes recent conversation messages together with the previous summary and saves the updated summary.
-
-This helps preserve important details for future questions without relying exclusively on the full conversation history.
-
-### Key Benefit
-
-The pipeline helps transform vague or context-dependent questions into more useful legal search queries while preserving conversation context and grounding generated answers in retrieved legal sources.
-
-The quality of the final answer depends on the available conversation context, retrieval quality, and relevance of the legal documents in the knowledge base.
 
 
 ## Installation
