@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, status, Request, File, UploadFile, Form
+from fastapi import FastAPI, APIRouter, status, Request, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from .schemes import PushRequest, SearchRequest, ChatRequest
@@ -10,6 +10,7 @@ import logging
 from tqdm.auto import tqdm
 from typing import Optional
 from uuid import UUID
+from models.UserModel import UserModel
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -303,16 +304,18 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
     })
 )
 
+
 @nlp_router.post("/chat/{project_id}")
 async def chat(
     request: Request,
     project_id: int,
 
     text: str = Form(...),
+    user_uuid: UUID = Form(...),
     conversation_uuid: Optional[UUID] = Form(None),
     limit: int = Form(10),
     reranker_limit: int = Form(20),
-    title: Optional[str] = Form("New conversation"),
+    title: Optional[str] = Form(None),
 
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
@@ -325,7 +328,7 @@ async def chat(
         conversation_uuid=conversation_uuid,
         limit=limit,
         reranker_limit=reranker_limit,
-        title=title,
+        title=title or "محادثة جديدة",
         latitude=latitude,
         longitude=longitude
     )
@@ -338,6 +341,22 @@ async def chat(
         project_id=project_id
     )
 
+    user_model = await UserModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    user = await user_model.get_user_by_uuid(
+        user_uuid=user_uuid
+    )
+
+    if user is None:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "signal": ResponseSignal.USER_NOT_FOUND.value
+            }
+        )
+
     conversation_model = await ConversationModel.create_instance(
         db_client=request.app.db_client
     )
@@ -346,10 +365,13 @@ async def chat(
         db_client=request.app.db_client
     )
 
+    is_new_conversation = chat_request.conversation_uuid is None
+
     conversation = await conversation_model.get_or_create_conversation(
-    project_id=project.project_id,
-    conversation_uuid=chat_request.conversation_uuid,
-    title=chat_request.title
+        project_id=project.project_id,
+        user_id=user.user_id,
+        conversation_uuid=chat_request.conversation_uuid,
+        title=chat_request.title,
     )
 
     if conversation is None:
@@ -408,5 +430,121 @@ async def chat(
         })
     )
 
-    
 
+
+@nlp_router.get("/conversations/{project_id}")
+async def list_conversations(
+    request: Request,
+    project_id: int,
+    user_uuid: UUID,
+    page_no: int = 1,
+    page_size: int = 50,
+):
+    if page_no < 1 or page_size < 1 or page_size > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid pagination parameters.",
+        )
+
+    user_model = await UserModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    user = await user_model.get_user_by_uuid(user_uuid=user_uuid)
+
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found.",
+        )
+
+    conversation_model = await ConversationModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    conversations = (
+        await conversation_model.get_conversations_by_user_and_project(
+            user_id=user.user_id,
+            project_id=project_id,
+            page_no=page_no,
+            page_size=page_size,
+        )
+    )
+
+    return {
+        "conversations": [
+            {
+                "conversation_uuid": str(item.conversation_uuid),
+                "title": item.title,
+                "summary": item.summary,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at,
+            }
+            for item in conversations
+        ],
+        "page_no": page_no,
+        "page_size": page_size,
+    }
+
+@nlp_router.get("/conversations/{project_id}/{conversation_uuid}/messages")
+async def get_conversation_messages(
+    request: Request,
+    project_id: int,
+    conversation_uuid: UUID,
+    user_uuid: UUID,
+):
+    user_model = await UserModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    user = await user_model.get_user_by_uuid(
+        user_uuid=user_uuid
+    )
+
+    if user is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ResponseSignal.USER_NOT_FOUND.value,
+        )
+
+    conversation_model = await ConversationModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    conversation = (
+        await conversation_model.get_conversation_by_uuid_project_and_user(
+            conversation_uuid=conversation_uuid,
+            project_id=project_id,
+            user_id=user.user_id,
+        )
+    )
+
+    if conversation is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ResponseSignal.CONVERSATION_NOT_FOUND.value,
+        )
+
+    message_model = await MessageModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    messages = await message_model.get_messages_by_conversation_id(
+        conversation_id=conversation.conversation_id,
+    )
+
+    return jsonable_encoder({
+        "conversation_uuid": str(conversation.conversation_uuid),
+        "title": conversation.title,
+        "messages": [
+            {
+                "role": (
+                    message.role.value
+                    if hasattr(message.role, "value")
+                    else message.role
+                ),
+                "content": message.content,
+            }
+            for message in messages
+        ],
+    })

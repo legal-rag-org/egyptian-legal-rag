@@ -50,6 +50,8 @@ dependencies = [
     "prometheus-client>=0.26.0",
     "starlette-exporter>=0.24.0",
     "fastapi-health>=0.4.0",
+    "bcrypt>=5.0.0",
+    "email-validator>=2.3.0",
 ]
 
 [[tool.uv.index]]

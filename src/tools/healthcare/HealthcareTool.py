@@ -2,6 +2,7 @@ from ..ToolInterface import ToolInterface
 from .OverpassClient import OverpassClient
 from services.AgentService import AgentContext
 from .GeocodingClient import GeocodingClient
+from .HealthCareEnums import HealthCareEnums
 
 import logging
 
@@ -15,16 +16,11 @@ class HealthcareTool(ToolInterface):
 
     @property
     def name(self) -> str:
-        return "healthcare_search"
+        return HealthCareEnums.NAME.value
 
     @property
     def description(self) -> str:
-        return (
-            "Find nearby hospitals, clinics, pharmacies or doctors. "
-            "If the user's real GPS location is available, it's used "
-            "automatically. Otherwise, extract the place name the user "
-            "mentioned and pass it as 'location_text'."
-        )
+        return HealthCareEnums.DESCRIPTION.value
 
     @property
     def schema(self) -> dict:
@@ -48,7 +44,7 @@ class HealthcareTool(ToolInterface):
                         "radius": {
                             "type": "integer",
                             "description": "Search radius in meters.",
-                            "default": 5000,
+                            "default": HealthCareEnums.DEFAULT_RADIUS.value,
                         }
                     },
                     "required": [],
@@ -56,7 +52,7 @@ class HealthcareTool(ToolInterface):
             },
         }
 
-    async def execute(self, latitude: float, longitude: float, radius: int = 5000):
+    async def execute(self, latitude: float, longitude: float, radius: int = HealthCareEnums.DEFAULT_RADIUS.value):
         RADIUS_ESCALATION = [radius, radius * 2, radius * 4]
 
         for r in RADIUS_ESCALATION:

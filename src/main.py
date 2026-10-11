@@ -1,16 +1,29 @@
 from fastapi import FastAPI
 from helpers import get_settings
-from routes import base_router, data_router, nlp_router
+from routes import base_router, data_router, nlp_router, user_router
 from helpers import get_settings
 from stores import LLMProviderFactory, VectorDBProviderFactory, RerankerProviderFactory, VisionFactory
 from stores.llm.templates import TemplateParser
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from utils.metrics import setup_metrics
+
 
 app = FastAPI()
 
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Prometheus metrics
 setup_metrics(app=app)
 
 @app.on_event("startup")
@@ -100,6 +113,7 @@ async def shutdown_span():
 app.include_router(base_router)
 app.include_router(data_router)
 app.include_router(nlp_router)
+app.include_router(user_router)
 
 
 

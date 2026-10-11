@@ -78,6 +78,71 @@ class HuggingFaceProvider(LLMInterface):
                    return None
 
             return response.choices[0].message.content
+
+     def generate_with_tools(
+       self,
+       messages: list,
+       tools: list,
+       max_output_tokens: int = None,
+       temperature: float = None,
+       ):
+
+       if not self.client:
+              self.logger.error(
+              "The HuggingFace client was not set"
+              )
+              return None
+
+       if not self.generation_model_id:
+              self.logger.error(
+              "The Generation model for HuggingFace was not set"
+              )
+              return None
+
+       if temperature is None:
+              temperature = self.temperature
+
+       if max_output_tokens is None:
+              max_output_tokens = (
+              self.default_generation_max_output_tokens
+              )
+
+       try:
+
+              response = self.client.chat.completions.create(
+              model=self.generation_model_id,
+              messages=messages,
+              tools=tools,
+              tool_choice="auto",
+              max_tokens=max_output_tokens,
+              temperature=temperature,
+              )
+
+       except Exception as e:
+
+              self.logger.error(
+              f"Error while generating response with HuggingFace: {e}"
+              )
+
+              return None
+
+       self.logger.info(
+              f"HuggingFace model used: {self.generation_model_id}"
+       )
+
+       if (
+              not response
+              or not response.choices
+              or not response.choices[0].message
+       ):
+
+              self.logger.error(
+              "Error while generating response with HuggingFace"
+              )
+
+              return None
+
+       return response.choices[0].message
      
 
      def embed_text(self, text: Union[str, List[str]], document_type: str = None):      

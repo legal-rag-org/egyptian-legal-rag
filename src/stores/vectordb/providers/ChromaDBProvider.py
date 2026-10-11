@@ -7,6 +7,7 @@ from helpers.metadata import FILTERABLE_METADATA
 import logging
 from typing import List
 import uuid
+import re
 
 class ChromaDBProvider(VectorDBInterface):
 
@@ -182,30 +183,68 @@ class ChromaDBProvider(VectorDBInterface):
 
             return False
 
-     async def search_by_vector(self, collection_name: str,
-                                      vector: list,
-                                      limit: int = 5,
-                                      filters: dict | None = None,) -> List[RetrievedDocument]:
+
+     def _build_chroma_filters(
+        self,
+        filters: dict | None,
+    ) -> dict | None:
+
+        if not filters:
+            return None
+
+        conditions = []
+
+        for key, value in filters.items():
+
+            if key not in FILTERABLE_METADATA:
+                continue
+
+            if isinstance(value, list):
+                conditions.append({
+                    key: {
+                        "$in": value
+                    }
+                })
+            else:
+                conditions.append({
+                    key: {
+                        "$eq": value
+                    }
+                })
+
+        if not conditions:
+            return None
+
+        if len(conditions) == 1:
+            return conditions[0]
+
+        return {
+            "$and": conditions
+        }
+
+     async def search_by_vector(
+        self,
+        collection_name: str,
+        vector: list,
+        limit: int,
+        filters: dict | None = None,
+    ) -> List[RetrievedDocument]:
 
         collection = self.client.get_collection(
             name=collection_name
         )
 
-        if filters:
-            filters = {
-                key: value
-                for key, value in filters.items()
-                if key in FILTERABLE_METADATA
-            }
+        # Keep only allowed metadata filters
+        where_filter = self._build_chroma_filters(filters)
 
         results = collection.query(
             query_embeddings=[vector],
             n_results=limit,
-            where=filters if filters else None
+            where=where_filter,
         )
 
-        if not results or not results["documents"]:
-            return None
+        if not results or not results.get("documents"):
+            return []
 
         documents = results["documents"][0]
         distances = results["distances"][0]
@@ -213,47 +252,153 @@ class ChromaDBProvider(VectorDBInterface):
 
         return [
             RetrievedDocument(
-                score=1 - distance,
                 text=document,
-                metadata=metadata,
+                score=1 - distance,
+                source=metadata.get("source"),
+                page=metadata.get("page"),
+                file_url=metadata.get("file_url"),
             )
             for document, distance, metadata
             in zip(documents, distances, metadatas)
         ]
 
-
-     async def search_by_keyword(self, collection_name: str,
-                                        query: str,
-                                        limit: int,
-                                        filters: dict | None = None,
-      ) -> List[RetrievedDocument]:
+     async def search_by_keyword(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int,
+        filters: dict | None = None,
+    ) -> List[RetrievedDocument]:
 
         collection = self.client.get_collection(
             name=collection_name
         )
 
+        where_filter = self._build_chroma_filters(filters)
+
         results = collection.get(
-            include=["documents"]
+            where=where_filter,
+            include=["documents", "metadatas"],
         )
 
         documents = results.get("documents", [])
+        metadatas = results.get("metadatas", [])
 
         if not documents:
             return []
 
+        # Tokenize documents
         tokenized_documents = [
             document.split()
             for document in documents
         ]
 
+        # BM25
         bm25 = BM25Okapi(tokenized_documents)
 
         query_tokens = query.split()
 
         scores = bm25.get_scores(query_tokens)
 
+        # Rank documents
         ranked_results = sorted(
-            zip(documents, scores),
+            zip(documents, scores, metadatas),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+
+        return [
+            RetrievedDocument(
+                text=document,
+                score=float(score),
+                source=metadata.get("source"),
+                page=metadata.get("page"),
+                file_url=metadata.get("file_url"),
+            )
+            for document, score, metadata
+            in ranked_results[:limit]
+        ]
+
+     def arabic_to_english_digits(self, text: str) -> str:
+        translation_table = str.maketrans(
+            "٠١٢٣٤٥٦٧٨٩",
+            "0123456789"
+        )
+
+        return text.translate(translation_table)
+
+
+     async def search_by_numeric(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int,
+        filters: dict | None = None,
+    ) -> List[RetrievedDocument]:
+
+        collection = self.client.get_collection(
+            name=collection_name
+        )
+
+        # Extract numeric tokens from query
+        normalized_query = self.arabic_to_english_digits(query)
+
+        numbers = re.findall(
+            r"(?<!\d)\d+(?!\d)",
+            normalized_query
+        )
+
+        if not numbers:
+            return []
+
+        # Metadata filters
+        if filters:
+            filters = {
+                key: value
+                for key, value in filters.items()
+                if key in FILTERABLE_METADATA
+            }
+
+        results = collection.get(
+            where=filters if filters else None,
+            include=["documents", "metadatas"],
+        )
+
+        documents = results.get("documents", [])
+        metadatas = results.get("metadatas", [])
+
+        if not documents:
+            return []
+
+        ranked_results = []
+
+        for document, metadata in zip(documents, metadatas):
+
+            score = 0
+
+            # Normalize Arabic digits inside document
+            normalized_document = self.arabic_to_english_digits(
+                document
+            )
+
+            for number in numbers:
+
+                pattern = rf"(?<!\d){re.escape(number)}(?!\d)"
+
+                if re.search(pattern, normalized_document):
+                    score += 1
+
+            if score > 0:
+                ranked_results.append(
+                    (
+                        document,
+                        score,
+                        metadata,
+                    )
+                )
+
+        # Highest number of matches first
+        ranked_results.sort(
             key=lambda x: x[1],
             reverse=True
         )
@@ -261,7 +406,10 @@ class ChromaDBProvider(VectorDBInterface):
         return [
             RetrievedDocument(
                 text=document,
-                score=float(score)
+                score=float(score),
+                source=metadata.get("source"),
+                page=metadata.get("page"),
+                file_url=metadata.get("file_url"),
             )
-            for document, score in ranked_results[:limit]
+            for document, score, metadata in ranked_results[:limit]
         ]

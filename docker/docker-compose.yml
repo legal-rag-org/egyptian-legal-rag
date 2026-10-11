@@ -10,6 +10,12 @@ services:
       - "8000:8000"
     volumes:
       - fastapi_data:/app/assets
+      - huggingface_cache:/app/.cache/huggingface
+
+    environment:
+     HF_HOME: /app/.cache/huggingface
+     HF_HUB_CACHE: /app/.cache/huggingface/hub
+
     networks:
       - backend
     restart: always
@@ -142,6 +148,7 @@ networks:
 
 volumes:
   fastapi_data:
+  huggingface_cache:
   pgvector_data:
   qdrant_data:
   prometheus_data:

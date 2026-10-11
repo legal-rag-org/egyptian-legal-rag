@@ -19,6 +19,7 @@ class Conversation(SQLAlchemyBase):
     summary = Column(Text, nullable=True)
 
     conversation_project_id = Column(Integer, ForeignKey("projects.project_id"), nullable=False)
+    conversation_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
 
     project = relationship(
         "Project",
@@ -28,6 +29,11 @@ class Conversation(SQLAlchemyBase):
     messages = relationship(
         "Message",
         back_populates="conversation"
+    )
+
+    user = relationship(
+        "User",
+        back_populates="conversations"
     )
 
 

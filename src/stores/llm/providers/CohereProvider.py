@@ -79,6 +79,63 @@ class CohereProvider(LLMInterface):
         
         return response.text
 
+    def generate_with_tools(
+        self,
+        messages: list,
+        tools: list,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+        if not self.client:
+            self.logger.error("Cohere client was not set")
+            return None
+
+        if not self.generation_model_id:
+            self.logger.error(
+                "Generation Model for Cohere was not set"
+            )
+            return None
+
+        max_output_tokens = (
+            max_output_tokens
+            if max_output_tokens is not None
+            else self.default_generation_output_max_tokens
+        )
+
+        temperature = (
+            temperature
+            if temperature is not None
+            else self.default_generation_temperature
+        )
+
+        try:
+            response = self.client.chat(
+                model=self.generation_model_id,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=max_output_tokens,
+                temperature=temperature,
+            )
+
+        except Exception as e:
+            self.logger.error(
+                f"Error while generating response with tools: {e}"
+            )
+            return None
+
+        self.logger.info(
+            f"Cohere model used: {self.generation_model_id}"
+        )
+
+        if not response:
+            self.logger.error(
+                "Error while generating response with tools"
+            )
+            return None
+
+        return response.message
+
     def embed_text(self, text: Union[str, List[str]], document_type: str = None):
         if not self.client:
             self.logger.error("CoHere client was not set")

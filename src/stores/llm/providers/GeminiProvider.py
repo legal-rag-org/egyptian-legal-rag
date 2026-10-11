@@ -161,6 +161,72 @@ class GeminiProvider(LLMInterface):
 
         return response.text
 
+    def generate_with_tools(
+        self,
+        messages: list,
+        tools: list,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+
+        if not self.client:
+            self.logger.error(
+                "The Gemini client was not set"
+            )
+            return None
+
+        if not self.generation_model_id:
+            self.logger.error(
+                "The Generation model for Gemini was not set"
+            )
+            return None
+
+        if temperature is None:
+            temperature = self.temperature
+
+        if max_output_tokens is None:
+            max_output_tokens = (
+                self.default_generation_max_output_tokens
+            )
+
+        try:
+
+            response = self.client.models.generate_content(
+                model=self.generation_model_id,
+                contents=messages,
+                config={
+                    "tools": tools,
+                    "temperature": temperature,
+                    "max_output_tokens": max_output_tokens,
+                },
+            )
+
+        except Exception as e:
+
+            self.logger.error(
+                f"Error while generating response with Gemini: {e}"
+            )
+
+            return None
+
+        self.logger.info(
+            f"Gemini model used: {self.generation_model_id}"
+        )
+
+        if (
+            not response
+            or not response.candidates
+            or not response.candidates[0].content
+        ):
+
+            self.logger.error(
+                "Error while generating response with Gemini"
+            )
+
+            return None
+
+        return response.candidates[0].content
+
     def embed_text(
         self,
         text: Union[str, List[str]],

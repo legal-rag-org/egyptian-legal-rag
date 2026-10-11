@@ -6,6 +6,7 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 from helpers.metadata import FILTERABLE_METADATA
 import logging
 from typing import List
+import re
 
 class QdrantProvider(VectorDBInterface):
 
@@ -169,7 +170,13 @@ class QdrantProvider(VectorDBInterface):
 
         return True
 
-    async def search_by_vector(self, collection_name: str, vector: list, limit: int = 5, filters: dict | None = None,) -> List[RetrievedDocument]:
+    async def search_by_vector(
+        self,
+        collection_name: str,
+        vector: list,
+        limit: int = 5,
+        filters: dict | None = None,
+    ) -> List[RetrievedDocument]:
 
         if vector and isinstance(vector[0], list):
             vector = vector[0]
@@ -177,16 +184,36 @@ class QdrantProvider(VectorDBInterface):
         query_filter = None
 
         if filters:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key=key,
-                        match=MatchValue(value=str(value)),
+            conditions = []
+
+            for key, value in filters.items():
+
+                if key not in FILTERABLE_METADATA:
+                    continue
+
+                if isinstance(value, list):
+                    conditions.append(
+                        FieldCondition(
+                            key=key,
+                            match=models.MatchAny(
+                                any=[str(v) for v in value]
+                            ),
+                        )
                     )
-                    for key, value in filters.items()
-                    if key in FILTERABLE_METADATA
-                ]
-            )
+                else:
+                    conditions.append(
+                        FieldCondition(
+                            key=key,
+                            match=MatchValue(
+                                value=str(value)
+                            ),
+                        )
+                    )
+
+            if conditions:
+                query_filter = Filter(
+                    must=conditions
+                )
 
         responses = self.client.query_points(
             collection_name=collection_name,
@@ -194,7 +221,7 @@ class QdrantProvider(VectorDBInterface):
             using="dense",
             query_filter=query_filter,
             limit=limit,
-            with_payload=True
+            with_payload=True,
         )
 
         if not responses.points:
@@ -203,40 +230,255 @@ class QdrantProvider(VectorDBInterface):
         return [
             RetrievedDocument(
                 score=point.score,
-                text=point.payload.get("text") if point.payload else None,
-                metadata=point.payload,
+                text=(
+                    point.payload.get("text")
+                    if point.payload
+                    else None
+                ),
+                source=(
+                    point.payload.get("source")
+                    if point.payload
+                    else None
+                ),
+                page=(
+                    point.payload.get("page")
+                    if point.payload
+                    else None
+                ),
+                file_url=(
+                    point.payload.get("file_url")
+                    if point.payload
+                    else None
+                ),
+            )
+            for point in responses.points
+        ]
+       
+
+    async def search_by_keyword(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int,
+        filters: dict | None = None,
+    ) -> List[RetrievedDocument]:
+
+        query_filter = None
+
+        if filters:
+            conditions = []
+
+            for key, value in filters.items():
+
+                if key not in FILTERABLE_METADATA:
+                    continue
+
+                if isinstance(value, list):
+                    conditions.append(
+                        FieldCondition(
+                            key=key,
+                            match=models.MatchAny(
+                                any=[str(v) for v in value]
+                            ),
+                        )
+                    )
+                else:
+                    conditions.append(
+                        FieldCondition(
+                            key=key,
+                            match=MatchValue(
+                                value=str(value)
+                            ),
+                        )
+                    )
+
+            if conditions:
+                query_filter = Filter(
+                    must=conditions
+                )
+
+        responses = self.client.query_points(
+            collection_name=collection_name,
+            query=models.Document(
+                text=query,
+                model="Qdrant/bm25",
+            ),
+            using="sparse",
+            query_filter=query_filter,
+            limit=limit,
+            with_payload=True,
+        )
+
+        if not responses.points:
+            return []
+
+        return [
+            RetrievedDocument(
+                score=point.score,
+                text=(
+                    point.payload.get("text")
+                    if point.payload
+                    else None
+                ),
+                source=(
+                    point.payload.get("source")
+                    if point.payload
+                    else None
+                ),
+                page=(
+                    point.payload.get("page")
+                    if point.payload
+                    else None
+                ),
+                file_url=(
+                    point.payload.get("file_url")
+                    if point.payload
+                    else None
+                ),
             )
             for point in responses.points
         ]
 
-    
-    
-        
+    def arabic_to_english_digits(
+        self,
+        text: str
+    ) -> str:
 
-    async def search_by_keyword(
-    self,
-    collection_name: str,
-    query: str,
-    limit: int,
-    filters: dict | None = None,
-    ):
+        translation_table = str.maketrans(
+            "٠١٢٣٤٥٦٧٨٩",
+            "0123456789"
+        )
 
-        results = self.client.query_points(
+        return text.translate(translation_table)
+
+    async def search_by_numeric(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int,
+        filters: dict | None = None,
+    ) -> List[RetrievedDocument]:
+
+        # Normalize Arabic digits in query
+        normalized_query = self.arabic_to_english_digits(
+            query
+        )
+
+        # Extract numeric tokens
+        numbers = re.findall(
+            r"(?<!\d)\d+(?!\d)",
+            normalized_query
+        )
+
+        if not numbers:
+            return []
+
+        # Build Qdrant metadata filter
+        query_filter = None
+
+        if filters:
+            conditions = []
+
+            for key, value in filters.items():
+
+                if key not in FILTERABLE_METADATA:
+                    continue
+
+                if isinstance(value, list):
+                    conditions.append(
+                        FieldCondition(
+                            key=key,
+                            match=models.MatchAny(
+                                any=[str(v) for v in value]
+                            ),
+                        )
+                    )
+                else:
+                    conditions.append(
+                        FieldCondition(
+                            key=key,
+                            match=MatchValue(
+                                value=str(value)
+                            ),
+                        )
+                    )
+
+            if conditions:
+                query_filter = Filter(
+                    must=conditions
+                )
+
+        # Get documents matching metadata filters
+        records = self.client.scroll(
             collection_name=collection_name,
-            query=models.Document(
-                text=query,
-                model="Qdrant/bm25"
-            ),
-            using="sparse",
-            limit=limit,
-            with_payload=True
-        ).points
+            scroll_filter=query_filter,
+            limit=10000,
+            with_payload=True,
+            with_vectors=False,
+        )[0]
+
+        if not records:
+            return []
+
+        ranked_results = []
+
+        for record in records:
+
+            payload = record.payload or {}
+
+            document = payload.get("text")
+
+            if not document:
+                continue
+
+            # Normalize Arabic digits inside document
+            normalized_document = (
+                self.arabic_to_english_digits(
+                    document
+                )
+            )
+
+            score = 0
+
+            # Check every number from query
+            for number in numbers:
+
+                pattern = (
+                    rf"(?<!\d)"
+                    rf"{re.escape(number)}"
+                    rf"(?!\d)"
+                )
+
+                if re.search(
+                    pattern,
+                    normalized_document
+                ):
+                    score += 1
+
+            # Keep only documents containing
+            # at least one requested number
+            if score > 0:
+                ranked_results.append(
+                    (
+                        record,
+                        score,
+                    )
+                )
+
+        # Highest number of matches first
+        ranked_results.sort(
+            key=lambda x: x[1],
+            reverse=True,
+        )
 
         return [
             RetrievedDocument(
-                text=record.payload["text"],
-                score=record.score
+                text=record.payload.get("text"),
+                score=float(score),
+                source=record.payload.get("source"),
+                page=record.payload.get("page"),
+                file_url=record.payload.get("file_url"),
             )
-            for record in results
+            for record, score in ranked_results[:limit]
         ]
         

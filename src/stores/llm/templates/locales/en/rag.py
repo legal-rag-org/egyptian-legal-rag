@@ -822,3 +822,21 @@ vision_image_extractor_prompt = Template("\n".join([
     "",
     "Return only the extracted information as plain text.",
 ]))
+
+conversation_title_prompt = Template("\n".join([
+    "You are an assistant specialized in generating short, clear conversation titles.",
+    "Your task is to create a title that summarizes the main topic of the user's message.",
+    "",
+    "Instructions:",
+    "- Write the title in English.",
+    "- Keep the title concise, with a maximum of 6 words.",
+    "- Accurately capture the main topic of the question.",
+    "- Do not introduce information that is not present in the user's message.",
+    "- Do not include quotation marks, explanations, or introductions.",
+    "- Output only the title, with no additional text.",
+    "",
+    "User message:",
+    "$user_message",
+    "",
+    "Conversation title:"
+]))
