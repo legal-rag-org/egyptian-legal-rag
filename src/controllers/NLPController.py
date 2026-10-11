@@ -579,6 +579,54 @@ class NLPController(BaseController):
     def _detect_injection(self, query: str) -> dict:
         return self.prompt_injuction.detect(query=query)
     
+
+    async def generate_conversation_title(
+        lightweight_client,
+        template_parser,
+        user_message: str,
+    ) -> str | None:
+        conversation_title_prompt = template_parser.get(
+                    group="rag",
+                    key="conversation_title_prompt",
+                    vars={
+                        "user_message":user_message 
+                    }
+                )
+
+        try:
+            result = await lightweight_client.generate_text(
+                prompt=conversation_title_prompt,
+                chat_history=[],
+            )
+
+            if isinstance(result, str):
+                title = result
+            elif isinstance(result, dict):
+                title = (
+                    result.get("text")
+                    or result.get("content")
+                    or result.get("answer")
+                    or result.get("generated_text")
+                )
+            else:
+                title = (
+                    getattr(result, "text", None)
+                    or getattr(result, "content", None)
+                )
+
+            if not isinstance(title, str):
+                return None
+
+            title = title.strip().strip('"').strip("'")
+            title = title.replace("\n", " ").strip()
+
+            if not title or len(title) > 120:
+                return None
+
+            return title
+
+        except Exception:
+            return None
             
 
     async def answer_chat_question(
@@ -592,6 +640,7 @@ class NLPController(BaseController):
     latitude: float | None = None,
     longitude: float | None = None
     ):
+        
 
         rewrite_query = await self._build_query_with_vision(query=query, image=image)
 

@@ -1,13 +1,15 @@
 from enum import Enum
 
+
 class HealthCareEnums(Enum):
-    
+
     NAME = "healthcare_search"
 
     DESCRIPTION = """
+        Find nearby hospitals, clinics, pharmacies or doctors.
+        If the user's real GPS location is available, it's used
+        automatically. Otherwise, extract the place name the user
+        mentioned and pass it as 'location_text'.
+    """
 
-                Search for nearby healthcare facilities such as 
-                hospitals, clinics, pharmacies, and doctors 
-                using the user's geographic location.
-                
-                """
+    DEFAULT_RADIUS = 5000

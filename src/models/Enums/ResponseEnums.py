@@ -22,6 +22,6 @@ class ResponseSignal(Enum):
     RAG_ANSWER_ERROR="rag-answer-error"
     RAG_ANSWER_SUCCESS="rag-answer-success"
     CONVERSATION_NOT_FOUND = "conversation-not-found"
-
+    USER_NOT_FOUND = "USER_NOT_FOUND"
     
     

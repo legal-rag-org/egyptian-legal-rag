@@ -89,6 +89,68 @@ class OpenAiProvider(LLMInterface):
 
         return response.choices[0].message.content
 
+    def generate_with_tools(
+        self,
+        messages: list,
+        tools: list,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+
+        if not self.client:
+            self.logger.error("OpenAI client was not set")
+            return None
+
+        if not self.generation_model_id:
+            self.logger.error(
+                "Generation Model for OpenAI was not set"
+            )
+            return None
+
+        max_output_tokens = (
+            max_output_tokens
+            if max_output_tokens is not None
+            else self.default_generation_output_max_tokens
+        )
+
+        temperature = (
+            temperature
+            if temperature is not None
+            else self.default_generation_temperature
+        )
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.generation_model_id,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=max_output_tokens,
+                temperature=temperature,
+            )
+
+        except Exception as e:
+            self.logger.error(
+                f"Error while generating response with tools: {e}"
+            )
+            return None
+
+        self.logger.info(
+            f"OpenAI model used: {response.model}"
+        )
+
+        if (
+            not response
+            or not response.choices
+            or not response.choices[0].message
+        ):
+            self.logger.error(
+                "Error while generating response with tools"
+            )
+            return None
+
+        return response.choices[0].message
+
 
     def embed_text(self,
                    text: Union[str, List[str]],
