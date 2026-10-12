@@ -136,47 +136,46 @@ export PS1="\\[\033[01;32m\\]\u@\h:\w\n\\[\033[00m\\]\\$ "
 
 ## Environment Variables
 
-Copy the example environment file:
+The project uses separate environment files for the application and its supporting Docker services.
+
+Create the required files from the provided examples:
 
 ```bash
-cp .env.example .env
+cd docker/env
+
+cp .env.example.app .env.app
+cp .env.example.postgres .env.postgres
+cp .env.example.grafana .env.grafana
+cp .env.example.postgres-exporter .env.postgres-exporter
 ```
 
-Set your environment variables in the `.env` file, such as:
+Update the generated files with the appropriate credentials and configuration values.
 
-```env
-OPENAI_API_KEY=your_api_key
-```
+Do not commit files containing secrets or real credentials to the repository.
+
+For more details, see the [Docker documentation](../docker).
 
 ## Run Docker Compose Services
 
-```bash
-cd docker
-cp .env.example .env
-```
-
-Update `.env` with your credentials.
-
-Then start the Docker Compose services:
+From the project root, create the required environment files as described above, then start the application and its supporting services:
 
 ```bash
-sudo docker compose up -d
+docker compose -f docker/docker-compose.yml up --build -d
 ```
 
-## Run the FastAPI Server
-
-From the `src` directory:
+Check the service status:
 
 ```bash
-cd src
-uv run uvicorn main:app --reload --host 0.0.0.0 --port 5000
+docker compose -f docker/docker-compose.yml ps
 ```
 
-The API will be available at:
+View the FastAPI logs:
 
-```text
-http://localhost:5000
+```bash
+docker compose -f docker/docker-compose.yml logs -f fastapi
 ```
+
+For service configuration, database persistence, monitoring, and troubleshooting, see the [Docker documentation](../docker).
 
 ## Run the Frontend
 
