@@ -1,6 +1,6 @@
 # egyptian-legal-rag
 
-An intelligent RAG-based assistant for Egyptian legal information, providing accurate answers from trusted sources.
+An intelligent RAG-based assistant for Egyptian legal information, providing context-aware answers grounded in trusted legal sources.
 
 ## Supported Domains
 
@@ -12,11 +12,23 @@ An intelligent RAG-based assistant for Egyptian legal information, providing acc
 - Customs Law
 - Reconciliation of Building Violations
 
-
 ## Requirements
 
-* Python 3.11 or later
-* [uv](https://docs.astral.sh/uv/)
+To run the application using Docker:
+
+- Docker
+- Docker Compose
+- Git
+
+To run the backend locally:
+
+- Python 3.11 or later
+- [uv](https://docs.astral.sh/uv/)
+
+To run the frontend locally:
+
+- Node.js
+- npm
 
 ## How It Works
 
@@ -81,8 +93,6 @@ If no relevant documents are retrieved, the system returns a predefined no-answe
 
 Combining conversation-aware query rewriting, hybrid retrieval, and reranking helps improve the relevance of the legal evidence provided to the language model. Selecting the top-ranked passages controls the generation context, while citations help users trace answers back to their legal sources.
 
-
-
 ## Installation
 
 ### Install uv
@@ -93,28 +103,30 @@ If you don't have `uv` installed, install it using:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Then verify the installation:
+Verify the installation:
 
 ```bash
 uv --version
 ```
 
-### Clone the repository
+### Clone the Repository
 
 ```bash
 git clone https://github.com/Ahmed-KKhaled/egyptian-legal-rag.git
 cd egyptian-legal-rag
 ```
 
-### Create the virtual environment and install dependencies
+### Install Dependencies
+
+Create the virtual environment and install the project dependencies:
 
 ```bash
 uv sync
 ```
 
-This will create the project's virtual environment and install all dependencies specified in `pyproject.toml`.
+This creates the project's virtual environment and installs the dependencies specified in `pyproject.toml` and `uv.lock`.
 
-### Activate the virtual environment
+### Activate the Virtual Environment
 
 You can activate the environment manually:
 
@@ -122,16 +134,10 @@ You can activate the environment manually:
 source .venv/bin/activate
 ```
 
-Or simply run project commands through `uv` without activating the environment:
+Alternatively, run project commands through `uv` without activating the environment:
 
 ```bash
 uv run <command>
-```
-
-### Setup your command line interface for better readability
-
-```bash
-export PS1="\\[\033[01;32m\\]\u@\h:\w\n\\[\033[00m\\]\\$ "
 ```
 
 ## Environment Variables
@@ -151,13 +157,15 @@ cp .env.example.postgres-exporter .env.postgres-exporter
 
 Update the generated files with the appropriate credentials and configuration values.
 
-Do not commit files containing secrets or real credentials to the repository.
+Do not commit files containing secrets, API keys, or real credentials to the repository.
 
-For more details, see the [Docker documentation](../docker).
+For additional details, see the [Docker documentation](docker/README.md).
 
 ## Run Docker Compose Services
 
-From the project root, create the required environment files as described above, then start the application and its supporting services:
+Docker Compose runs the FastAPI application and its supporting services, including PostgreSQL with pgvector, Qdrant, and the monitoring stack.
+
+From the project root, start the services:
 
 ```bash
 docker compose -f docker/docker-compose.yml up --build -d
@@ -175,7 +183,51 @@ View the FastAPI logs:
 docker compose -f docker/docker-compose.yml logs -f fastapi
 ```
 
-For service configuration, database persistence, monitoring, and troubleshooting, see the [Docker documentation](../docker).
+### API Endpoints
+
+Once the FastAPI service is running:
+
+| Service | URL |
+|---|---|
+| FastAPI | http://localhost:8000 |
+| Swagger UI | http://localhost:8000/docs |
+| ReDoc | http://localhost:8000/redoc |
+| Metrics | http://localhost:8000/metrics |
+
+For service configuration, monitoring, database persistence, backups, and troubleshooting, see the [Docker documentation](docker/README.md).
+
+## Run the Backend Locally
+
+You can run FastAPI outside Docker if you prefer local development.
+
+First, install the dependencies from the project root:
+
+```bash
+uv sync
+```
+
+Make sure the required environment variables are configured and the supporting services are running.
+
+If PostgreSQL and Qdrant are running inside Docker, use the appropriate host-accessible ports when connecting from the local backend. Docker service names such as `pgvector` and `qdrant` are intended for communication between containers on the Docker network.
+
+Start the FastAPI server:
+
+```bash
+cd src
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The API will be available at:
+
+```text
+http://localhost:8000
+```
+
+Swagger documentation:
+
+```text
+http://localhost:8000/docs
+```
 
 ## Run the Frontend
 
@@ -210,10 +262,7 @@ The frontend will be available at the local URL displayed in your terminal, usua
 http://localhost:5173
 ```
 
-Make sure the FastAPI server is running before using the frontend. The frontend must also be configured to connect to the correct backend API URL.
+Make sure the FastAPI server is running before using the frontend. Configure the frontend to connect to the correct backend API URL.
+## Additional Documentation
 
-Swagger API documentation:
-
-```text
-http://localhost:5000/docs
-```
+For detailed Docker configuration, environment variables, service management, database persistence, monitoring, backups, and troubleshooting, see the [Docker documentation](docker/README.md).
