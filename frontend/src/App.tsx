@@ -85,7 +85,7 @@ function App() {
     setConversationError("");
 
     try {
-      const data = await getConversations(userUuid);
+      const data = await getConversations();
       setConversations(data);
     } catch (error) {
       console.error("Failed to load conversations:", error);
@@ -141,11 +141,11 @@ function App() {
     setLoginLoading(true);
 
     try {
-      const user = await loginUser(email.trim(), password);
+      const response = await loginUser(email.trim(), password);
 
-      setUserUuid(user.user_uuid);
-      setUsername(user.username);
-      setEmail(user.email);
+      setUserUuid(response.user.user_uuid);
+      setUsername(response.user.username);
+      setEmail(response.user.email);
       setIsLoggedIn(true);
 
       setMessages([]);
@@ -191,7 +191,6 @@ function App() {
 
     try {
       const data = await getConversationMessages(
-        userUuid,
         conversation.conversation_uuid,
       );
 
@@ -277,7 +276,6 @@ function App() {
     try {
       const response = await sendMessageApi(
         question,
-        userUuid,
         conversationUuid,
         imageToSend,
       );
