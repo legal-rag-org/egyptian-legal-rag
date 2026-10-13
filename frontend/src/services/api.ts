@@ -1,5 +1,7 @@
 const API_URL = "http://localhost:8000";
 
+// Types 
+
 export interface Citation {
     source: string;
     page: number;
@@ -21,104 +23,10 @@ export interface UserResponse {
     email: string;
 }
 
-
-export async function sendMessage(
-    question: string,
-    userUuid: string,
-    conversationUuid?: string,
-    image?: File | null,
-): Promise<ChatResponse> {
-    const formData = new FormData();
-
-    formData.append("text", question);
-    formData.append("user_uuid", userUuid);
-
-    if (conversationUuid) {
-        formData.append("conversation_uuid", conversationUuid);
-    }
-
-    if (image) {
-        formData.append("image", image);
-    }
-
-    const response = await fetch(
-        `${API_URL}/api/v1/nlp/chat/1`,
-        {
-            method: "POST",
-            body: formData,
-        },
-    );
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Backend error:", errorText);
-        throw new Error(`Request failed: ${response.status}`);
-    }
-
-    return response.json();
-}
-
-
-export async function createUser(
-    username: string,
-    email: string,
-    password: string,
-): Promise<UserResponse> {
-    const response = await fetch(
-        `${API_URL}/api/v1/users`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                username,
-                email,
-                password,
-            }),
-        },
-    );
-
-    if (!response.ok) {
-        const errorText = await response.text();
-
-        console.error("Backend status:", response.status);
-        console.error("Backend error:", errorText);
-
-        throw new Error(errorText);
-    }
-
-    return response.json();
-}
-
-export async function loginUser(
-    email: string,
-    password: string,
-): Promise<UserResponse> {
-    const response = await fetch(
-        `${API_URL}/api/v1/users/login`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                email,
-                password,
-            }),
-        },
-    );
-
-    if (!response.ok) {
-        const errorText = await response.text();
-
-        console.error("Backend status:", response.status);
-        console.error("Backend error:", errorText);
-
-        throw new Error(errorText);
-    }
-
-    return response.json();
+export interface LoginResponse {
+    access_token: string;
+    token_type: string;
+    user: UserResponse;
 }
 
 export interface Conversation {
@@ -138,14 +46,126 @@ export interface ConversationMessagesResponse {
     }[];
 }
 
-export async function getConversations(
-    userUuid: string,
-): Promise<Conversation[]> {
+// Authentication 
+
+function getAuthHeaders(): HeadersInit {
+    const accessToken = localStorage.getItem("access_token");
+
+    if (!accessToken) {
+        throw new Error("You must log in first.");
+    }
+
+    return {
+        Authorization: `Bearer ${accessToken}`,
+    };
+}
+
+export async function createUser(
+    username: string,
+    email: string,
+    password: string,
+): Promise<UserResponse> {
+    const response = await fetch(`${API_URL}/api/v1/users`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            username,
+            email,
+            password,
+        }),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Registration error:", errorText);
+        throw new Error(errorText);
+    }
+
+    return response.json();
+}
+
+export async function loginUser(
+    email: string,
+    password: string,
+): Promise<LoginResponse> {
+    const response = await fetch(`${API_URL}/api/v1/users/login`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            email,
+            password,
+        }),
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Login error:", errorText);
+        throw new Error(errorText);
+    }
+
+    const data: LoginResponse = await response.json();
+
+    // Save the token for subsequent authenticated requests.
+    localStorage.setItem("access_token", data.access_token);
+
+    return data;
+}
+
+export function logoutUser(): void {
+    localStorage.removeItem("access_token");
+}
+
+// Chat 
+
+export async function sendMessage(
+    question: string,
+    conversationUuid?: string,
+    image?: File | null,
+): Promise<ChatResponse> {
+    const formData = new FormData();
+
+    formData.append("text", question);
+
+    if (conversationUuid) {
+        formData.append("conversation_uuid", conversationUuid);
+    }
+
+    if (image) {
+        formData.append("image", image);
+    }
+
+    const response = await fetch(`${API_URL}/api/v1/nlp/chat/1`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Chat error:", errorText);
+        throw new Error(`Request failed: ${response.status} - ${errorText}`);
+    }
+
+    return response.json();
+}
+
+// Conversations
+
+export async function getConversations(): Promise<Conversation[]> {
     const response = await fetch(
-        `${API_URL}/api/v1/nlp/conversations/1?user_uuid=${encodeURIComponent(userUuid)}`,
+        `${API_URL}/api/v1/nlp/conversations/1`,
+        {
+            headers: getAuthHeaders(),
+        },
     );
 
     if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Get conversations error:", errorText);
         throw new Error("Failed to load conversations");
     }
 
@@ -154,14 +174,18 @@ export async function getConversations(
 }
 
 export async function getConversationMessages(
-    userUuid: string,
     conversationUuid: string,
 ): Promise<ConversationMessagesResponse> {
     const response = await fetch(
-        `${API_URL}/api/v1/nlp/conversations/1/${encodeURIComponent(conversationUuid)}/messages?user_uuid=${encodeURIComponent(userUuid)}`,
+        `${API_URL}/api/v1/nlp/conversations/1/${encodeURIComponent(conversationUuid)}/messages`,
+        {
+            headers: getAuthHeaders(),
+        },
     );
 
     if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Get conversation messages error:", errorText);
         throw new Error("Failed to load conversation messages");
     }
 
