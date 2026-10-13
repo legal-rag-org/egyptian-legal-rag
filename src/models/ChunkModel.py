@@ -37,8 +37,12 @@ class ChunkModel(BaseDataModel):
 
     async def insert_many_chunks(self, chunks: list, batch_size: int=100):
 
+        if batch_size < 1:
+             raise ValueError("batch_size must be >= 1")
+
         async with self.db_client() as session:
              async with session.begin():
+                  
                   for i in range(0, len(chunks), batch_size):
                        batch = chunks[i : batch_size + i]
                        session.add_all(batch)
@@ -63,10 +67,10 @@ class ChunkModel(BaseDataModel):
                                              page_size: int=50):
 
         if page_no < 1:
-            raise ValueError("page must be >= 1")
+            raise ValueError("page_no must be >= 1")
 
-        if page_size < 1:       
-            raise ValueError("page_size must be >= 1")
+        if not 1 <= page_size <= 100:
+            raise ValueError("page_size must be between 1 and 100")
 
         async with self.db_client() as session:
               
@@ -78,14 +82,14 @@ class ChunkModel(BaseDataModel):
         return records
 
     async def get_chunks_by_asset_id(self, asset_id: int,
-                                                 page_no: int=1,
-                                                 page_size: int=50):
+                                            page_no: int = 1,
+                                            page_size: int = 50):
     
             if page_no < 1:
-                raise ValueError("page must be >= 1")
-    
-            if page_size < 1:       
-                raise ValueError("page_size must be >= 1")
+                raise ValueError("page_no must be >= 1")
+
+            if not 1 <= page_size <= 100:
+                raise ValueError("page_size must be between 1 and 100")
     
             async with self.db_client() as session:
                   
