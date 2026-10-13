@@ -52,6 +52,7 @@ dependencies = [
     "fastapi-health>=0.4.0",
     "bcrypt>=5.0.0",
     "email-validator>=2.3.0",
+    "pyjwt>=2.15.1",
 ]
 
 [[tool.uv.index]]

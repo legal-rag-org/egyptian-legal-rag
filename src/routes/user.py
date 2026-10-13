@@ -1,16 +1,22 @@
-from fastapi import APIRouter, HTTPException, Request, status
-from .schemes.user import UserCreateRequest, UserLoginRequest
+from fastapi import APIRouter, HTTPException, Request, status, Depends
+from .schemes.user import UserCreateRequest, UserLoginRequest, UserResponse, LoginResponse
 
 from models.UserModel import UserModel
+from models.db_schemes.insurance_rag.schemes import User
+
+from typing import Annotated
+
+from utils.auth import get_current_user, create_access_token
+
 
 
 user_router = APIRouter(
     prefix="/api/v1/users",
-    tags=["users"],
+    tags=["api_v1","users"],
 )
 
 
-@user_router.post("")
+@user_router.post("", response_model=UserResponse)
 async def create_user(
     request: Request,
     user_data: UserCreateRequest,
@@ -35,14 +41,14 @@ async def create_user(
         password=user_data.password,
     )
 
-    return {
-        "user_uuid": str(user.user_uuid),
-        "username": user.username,
-        "email": user.email,
-    }
+    return UserResponse(
+        user_uuid=user.user_uuid,
+        username=user.username,
+        email=user.email,
+    )
 
 
-@user_router.post("/login")
+@user_router.post("/login", response_model=LoginResponse)
 async def login_user(
     request: Request,
     user_data: UserLoginRequest,
@@ -72,8 +78,27 @@ async def login_user(
             detail="Invalid email or password.",
         )
 
+    access_token = create_access_token(
+        user_uuid=str(user.user_uuid)
+    )
+
     return {
-        "user_uuid": str(user.user_uuid),
-        "username": user.username,
-        "email": user.email,
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "user_uuid": str(user.user_uuid),
+            "username": user.username,
+            "email": user.email,
+        },
     }
+
+
+
+@user_router.get("/me", response_model=UserResponse)
+async def get_me(
+    current_user: Annotated[
+        User,
+        Depends(get_current_user),
+    ],
+):
+    return current_user

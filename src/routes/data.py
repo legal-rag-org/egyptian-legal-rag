@@ -163,7 +163,7 @@ async def process_endpoint(request: Request, project_id: int, process_request: P
              template_parser=request.app.template_parser,
              reranker_client=request.app.reranker_client,
              message_model=message_model,
-             ligthweigth_client=request.app.ligthweigth_client,
+             lightweight_client=request.app.ligthweigth_client,
              conversation_model=conversation_model,
              vision_client=request.app.vision_client 
      )
