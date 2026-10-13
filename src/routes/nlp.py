@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, status, Request, File, UploadFile, Form, HTTPException
+from fastapi import APIRouter, status, Request, File, UploadFile, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from .schemes import PushRequest, SearchRequest, ChatRequest
@@ -11,6 +11,8 @@ from tqdm.auto import tqdm
 from typing import Optional
 from uuid import UUID
 from models.UserModel import UserModel
+
+from utils.auth import get_current_user
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -55,7 +57,7 @@ async def index_project(request: Request, project_id: int, push_request: PushReq
         template_parser=request.app.template_parser,
         reranker_client=request.app.reranker_client,
         message_model=message_model,
-        ligthweigth_client=request.app.ligthweigth_client ,
+        lightweight_client=request.app.ligthweigth_client ,
         conversation_model=conversation_model,
         vision_client=request.app.vision_client 
     )
@@ -170,7 +172,7 @@ async def get_project_index_info(request: Request, project_id: int):
         template_parser=request.app.template_parser,
         reranker_client=request.app.reranker_client,
         message_model=message_model,
-        ligthweigth_client=request.app.ligthweigth_client,
+        lightweight_client=request.app.ligthweigth_client,
         conversation_model=conversation_model ,
         vision_client=request.app.vision_client 
     )
@@ -219,7 +221,7 @@ async def search_index(request: Request, project_id: int, search_request: Search
         template_parser=request.app.template_parser,
         reranker_client=request.app.reranker_client,
         message_model=message_model,
-        ligthweigth_client=request.app.ligthweigth_client ,
+        lightweight_client=request.app.ligthweigth_client ,
         conversation_model=conversation_model,
         vision_client=request.app.vision_client 
     )
@@ -272,7 +274,7 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
         template_parser=request.app.template_parser,
         reranker_client=request.app.reranker_client,
         message_model=message_model,
-        ligthweigth_client=request.app.ligthweigth_client,
+        lightweight_client=request.app.ligthweigth_client,
         conversation_model=conversation_model,
         vision_client=request.app.vision_client 
     )
@@ -309,9 +311,9 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
 async def chat(
     request: Request,
     project_id: int,
+    current_user = Depends(get_current_user),
 
     text: str = Form(...),
-    user_uuid: UUID = Form(...),
     conversation_uuid: Optional[UUID] = Form(None),
     limit: int = Form(10),
     reranker_limit: int = Form(20),
@@ -341,22 +343,6 @@ async def chat(
         project_id=project_id
     )
 
-    user_model = await UserModel.create_instance(
-        db_client=request.app.db_client
-    )
-
-    user = await user_model.get_user_by_uuid(
-        user_uuid=user_uuid
-    )
-
-    if user is None:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "signal": ResponseSignal.USER_NOT_FOUND.value
-            }
-        )
-
     conversation_model = await ConversationModel.create_instance(
         db_client=request.app.db_client
     )
@@ -369,7 +355,7 @@ async def chat(
 
     conversation = await conversation_model.get_or_create_conversation(
         project_id=project.project_id,
-        user_id=user.user_id,
+        user_id=current_user.user_id,
         conversation_uuid=chat_request.conversation_uuid,
         title=chat_request.title,
     )
@@ -389,7 +375,7 @@ async def chat(
         template_parser=request.app.template_parser,
         reranker_client=request.app.reranker_client,
         message_model=message_model,
-        ligthweigth_client=request.app.ligthweigth_client,
+        lightweight_client=request.app.ligthweigth_client,
         conversation_model=conversation_model,
         vision_client=request.app.vision_client 
     )
@@ -436,7 +422,7 @@ async def chat(
 async def list_conversations(
     request: Request,
     project_id: int,
-    user_uuid: UUID,
+    current_user = Depends(get_current_user),
     page_no: int = 1,
     page_size: int = 50,
 ):
@@ -446,25 +432,13 @@ async def list_conversations(
             detail="Invalid pagination parameters.",
         )
 
-    user_model = await UserModel.create_instance(
-        db_client=request.app.db_client
-    )
-
-    user = await user_model.get_user_by_uuid(user_uuid=user_uuid)
-
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail="User not found.",
-        )
-
     conversation_model = await ConversationModel.create_instance(
         db_client=request.app.db_client
     )
 
     conversations = (
         await conversation_model.get_conversations_by_user_and_project(
-            user_id=user.user_id,
+            user_id=current_user.user_id,
             project_id=project_id,
             page_no=page_no,
             page_size=page_size,
@@ -491,21 +465,9 @@ async def get_conversation_messages(
     request: Request,
     project_id: int,
     conversation_uuid: UUID,
-    user_uuid: UUID,
+    current_user = Depends(get_current_user),
 ):
-    user_model = await UserModel.create_instance(
-        db_client=request.app.db_client
-    )
 
-    user = await user_model.get_user_by_uuid(
-        user_uuid=user_uuid
-    )
-
-    if user is None:
-        raise HTTPException(
-            status_code=404,
-            detail=ResponseSignal.USER_NOT_FOUND.value,
-        )
 
     conversation_model = await ConversationModel.create_instance(
         db_client=request.app.db_client
@@ -515,7 +477,7 @@ async def get_conversation_messages(
         await conversation_model.get_conversation_by_uuid_project_and_user(
             conversation_uuid=conversation_uuid,
             project_id=project_id,
-            user_id=user.user_id,
+            user_id=current_user.user_id,
         )
     )
 
