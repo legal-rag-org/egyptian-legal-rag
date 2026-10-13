@@ -9,7 +9,7 @@ class DataController(BaseController):
 
     def __init__(self):
         super().__init__()
-        self.size_scale = 1048576 # convert MB to bytes
+        self.size_scale = 1024 * 1024 # convert MB to bytes
 
 
     def validate_uploaded_file(self, file: UploadFile):
@@ -48,11 +48,15 @@ class DataController(BaseController):
 
     def get_clean_file_name(self, orig_file_name: str):
 
-        # remove any special characters, except underscore and .
-        cleaned_file_name = re.sub(r'[^\w.]', '', orig_file_name.strip())
+        # Replace special characters with underscores, preserving word characters, dots, and hyphens.
+        cleaned_file_name = re.sub(
+            r"[^\w.-]",
+            "_",
+            orig_file_name.strip(),
+        )
 
-        # replace spaces with underscore
-        cleaned_file_name = cleaned_file_name.replace(" ", "_")
+        # Remove leading and trailing dots and underscores.
+        cleaned_file_name = cleaned_file_name.strip("._")
 
         return cleaned_file_name
 

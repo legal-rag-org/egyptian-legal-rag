@@ -1,20 +1,23 @@
-from .BaseController import BaseController
-from .ProjectController import ProjectController
-import os
-from langchain_community.document_loaders import TextLoader
-from .loaders import OCRPDFLoader, PDFTableDetector, TableLoader, PDFTextLayerLoader
-import re
-from models import ProcessingEnum
-from .enums.nlp import ProcessControllerEnums
 import logging
-from typing import List
+import os
 import re
 from dataclasses import dataclass
+from typing import Any
+
+from langchain_community.document_loaders import TextLoader
+
+from models import ProcessingEnum
+
+from .BaseController import BaseController
+from .ProjectController import ProjectController
+from .enums.nlp import ProcessControllerEnums
+from .loaders import PDFTableDetector, TableLoader, PDFTextLayerLoader
+
 
 @dataclass
 class Document:
     page_content : str
-    metadata: dict
+    metadata: dict[str, Any]
 
 class ProcessController(BaseController):
     def __init__(self, project_id: str, vision_model):
@@ -31,24 +34,26 @@ class ProcessController(BaseController):
 
         return file_ext
 
+    
     def get_file_loader(self, file_id: str):
+        file_path = os.path.join(self.project_path, file_id)
 
-        file_ext = self.get_file_extension(file_id=file_id)
-        file_path = os.path.join(
-            self.project_path,
-            file_id
-        )
-
-        if not os.path.exists(file_path):
+        if not os.path.isfile(file_path):
+            self.logger.warning("File not found: %s", file_id)
             return None
 
-        if file_ext == ProcessingEnum.TXT.value:
-            return TextLoader(file_path, encoding="utf-8")
+        file_ext = self.get_file_extension(file_id).lower()
 
-        elif file_ext == ProcessingEnum.PDF.value:
-            return PDFTextLayerLoader(file_path)
+        loaders = {
+            ProcessingEnum.TXT.value: lambda: TextLoader(
+                file_path, encoding="utf-8"
+            ),
+            ProcessingEnum.PDF.value: lambda: PDFTextLayerLoader(file_path),
+        }
 
-        return None
+        loader_factory = loaders.get(file_ext)
+        return loader_factory() if loader_factory else None
+
 
     def get_file_content(self, file_id: str):
 
@@ -92,7 +97,7 @@ class ProcessController(BaseController):
                 overlap_size=overlap_size
             )
 
-    def split_by_article_marker(self, text: str):
+    def split_by_article_marker(self, text: str): 
         pattern = re.compile(
             r'(?im)^\s*'
             r'\(?\s*'
@@ -154,7 +159,7 @@ class ProcessController(BaseController):
         chunk_size: int = 1000,
         overlap_size: int = 100
     ):
-        base_metadata = ProcessControllerEnums.base_metadata.value
+        base_metadata = ProcessControllerEnums.BASE_METADATA.value
 
         file_content = self.get_file_content(
             file_id=file_id
@@ -177,9 +182,35 @@ class ProcessController(BaseController):
             if not text:
                 continue
 
+            
             articles = self.split_by_article_marker(text)
 
+            # Fallback for text without article markers
+            if not articles:
+                chunks = self._sliding_window(
+                    text=text,
+                    chunk_size=chunk_size,
+                    overlap_size=overlap_size,
+                )
+
+                metadata = {
+                    **base_metadata,
+                    "article": "unknown",
+                    "content_type": "text",
+                }
+
+                for chunk in chunks:
+                    documents.append(
+                        Document(
+                            page_content=chunk.strip(),
+                            metadata=metadata.copy(),
+                        )
+                    )
+
+                continue
+
             for article_number, article_text in articles:
+
 
                 metadata = {
                     **base_metadata,
@@ -215,164 +246,7 @@ class ProcessController(BaseController):
         return documents
 
 
-    def split_by_official_gazette(self, text: str):
-        pattern = re.compile(
-            r"(?=الجريدة\s+الرسمية\s*[-–—]\s*"
-            r"العدد\s+\d+\s+مكرر"
-            r"(?:\s*\([^)]+\))?"
-            r"\s+في\s+\d+\s+"
-            r"(?:يناير|فبراير|مارس|أبريل|مايو|يونيو|يوليو|أغسطس|سبتمبر|أكتوبر|نوفمبر|ديسمبر)"
-            r"\s+سنة\s+\d{4})"
-        )
-
-        matches = list(pattern.finditer(text))
-
-        if not matches:
-            return [("unknown", text)]
-
-        sections = []
-
-        for index, match in enumerate(matches):
-            start = match.start()
-
-            if index + 1 < len(matches):
-                end = matches[index + 1].start()
-            else:
-                end = len(text)
-
-            section_text = text[start:end].strip()
-
-            if section_text:
-                sections.append(
-                    (
-                        match.group().strip(),
-                        section_text
-                    )
-                )
-
-        return sections
-
-
-    def _chunk_gazette_section(
-    self,
-    section_title: str,
-    section_text: str,
-    chunk_size: int,
-):
-        # Remove the title from the section body
-        body = section_text[len(section_title):].strip()
-
-        # Reserve space for the title
-        available_size = chunk_size - len(section_title) - 1
-
-        if available_size <= 0:
-            raise ValueError(
-                "chunk_size is too small for the gazette header."
-            )
-
-        chunks = []
-
-        start = 0
-        while start < len(body):
-            body_chunk = body[start:start + available_size]
-
-            chunk = f"{section_title}\n{body_chunk}"
-
-            chunks.append(chunk)
-
-            start += available_size
-
-        return chunks
-
-
-
-    def process_structured_splitter(
-    self,
-    text: str,
-    metadata: dict,
-    chunk_size: int = 1000,
-    overlap_size: int = 100
-):
-        documents = []
-
-        record_pattern = re.compile(r'(?=(?:السجل|الرمز):\s*\S+)')
-        blocks = [b.strip() for b in record_pattern.split(text) if b.strip()]
-
-        for block in blocks:
-            is_pure_table = re.search(r'\|.*\|', block) and '---' in block and not block.startswith(('السجل:', 'الرمز:'))
-
-            if is_pure_table:
-                for chunk_text in self._chunk_table_block(block, chunk_size):
-                    documents.append(Document(page_content=chunk_text.strip(), metadata=metadata.copy()))
-
-            elif block.startswith(('السجل:', 'الرمز:')):
-                if len(block) <= chunk_size:
-                    documents.append(Document(page_content=block, metadata=metadata.copy()))
-                else:
-                    for chunk_text in self._chunk_by_heading(block, chunk_size, overlap_size):
-                        documents.append(Document(page_content=chunk_text.strip(), metadata=metadata.copy()))
-            else:
-                for chunk_text in self._chunk_by_heading(block, chunk_size, overlap_size):
-                    documents.append(Document(page_content=chunk_text.strip(), metadata=metadata.copy()))
-
-        return documents
-
-
-    def _chunk_table_block(self, block: str, chunk_size: int):
-        lines = block.split('\n')
-        header_lines = []
-        row_lines = []
-        seen_separator = False
-
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            is_separator = bool(re.match(r'^\|?[\s\-:|]+\|?$', stripped)) and '-' in stripped
-            if is_separator:
-                header_lines.append(line)
-                seen_separator = True
-            elif seen_separator and stripped.startswith('|'):
-                row_lines.append(line)
-            else:
-                header_lines.append(line)
-
-        header = '\n'.join(header_lines)
-        chunks = []
-        current = header
-
-        for row in row_lines:
-            if len(current) + len(row) > chunk_size:
-                chunks.append(current)
-                current = header + '\n' + row
-            else:
-                current += '\n' + row
-
-        if current.strip() != header.strip():
-            chunks.append(current)
-
-        return chunks if chunks else [block]
-
-
-    def _chunk_by_heading(self, block: str, chunk_size: int, overlap_size: int):
-        heading_pattern = re.compile(
-            r'(?=(?:الباب|الفصل|القسم|العنوان)[^\n]*:)|(?=^#{1,3}\s)',
-            re.MULTILINE
-        )
-        sub_blocks = [sb.strip() for sb in heading_pattern.split(block) if sb.strip()]
-
-        result = []
-        for sb in sub_blocks:
-            if re.search(r'\|.*\|', sb) and '---' in sb:
-                result.extend(self._chunk_table_block(sb, chunk_size))
-            elif len(sb) <= chunk_size:
-                result.append(sb)
-            else:
-                result.extend(self._sliding_window(sb, chunk_size, overlap_size))
-        return result
-
-
-    def _sliding_window(self, text: str, chunk_size: int, overlap_size: int):
+    def _sliding_window(self, text: str, chunk_size: int, overlap_size: int): 
         chunks = []
         start = 0
         n = len(text)
@@ -581,15 +455,7 @@ class ProcessController(BaseController):
     overlap_size: int = 100,
 ):
 
-        base_metadata = {
-            "domain": "customs",
-            "source": "قانون الجمارك الصادر بالقانون رقم 207 لسنة 2020",
-            "document_type": "law",
-            "law_number": "207",
-            "law_year": "2020",
-            "language": "ar",
-            "file_url": "https://customs.gov.eg/Upload/ECAAdminace/ECAAdminace474457860.pdf",
-        }
+        base_metadata = ProcessControllerEnums.BASE_METADATA.value
 
         file_path = os.path.join(
             self.project_path,

@@ -3,6 +3,7 @@ from .db_schemes.insurance_rag.schemes import User
 from sqlalchemy import select
 import bcrypt
 
+from uuid import UUID
 
 class UserModel(BaseDataModel):
 
@@ -60,7 +61,7 @@ class UserModel(BaseDataModel):
             password_hash.encode("utf-8"),
         )
 
-    async def get_user_by_uuid(self, user_uuid):
+    async def get_user_by_uuid(self, user_uuid: UUID):
         async with self.db_client() as session:
             search_stmt = select(User).where(
                 User.user_uuid == user_uuid

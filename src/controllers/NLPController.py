@@ -1,6 +1,6 @@
 from .BaseController import BaseController
 from models import Project, Chunk
-from models.db_schemes.insurance_rag.schemes import Conversation, Message
+from models.db_schemes.insurance_rag.schemes import Message
 from typing import List
 from stores.llm.LLMEnums import DocumentTypeEnum
 from stores.vectordb.VectorDBEnums import PgVectorTableSchemeEnums
@@ -10,18 +10,15 @@ from services.MetadataFilterExtractor import MetadataFilterExtractor
 from services.SummaryMemory import SummaryMemory
 from helpers.metadata import FILTERABLE_METADATA
 from .enums.nlp import ProcessControllerEnums
-from models.ConversationModel import ConversationModel
 from services.PromptInjuction import PromptInjectionDetector
 
-from services.AgentService import AgentService
+from services.AgentService import AgentContext, AgentService
 from tools.ToolRegistry import ToolRegistry
 from tools.healthcare.HealthcareTool import HealthcareTool
 from tools.rag.RAGTool import RAGTool
 
-from services.AgentService import AgentContext
 
 from fastapi import UploadFile
-import os
 import tempfile
 from pathlib import Path
 
@@ -34,7 +31,7 @@ class NLPController(BaseController):
                        reranker_client,
                        message_model,
                        conversation_model,
-                       ligthweigth_client,
+                       lightweight_client,
                        vision_client):
         
         super().__init__()
@@ -46,16 +43,21 @@ class NLPController(BaseController):
         self.reranker_client = reranker_client
         self.message_model = message_model
         self.conversation_model = conversation_model
-        self.ligthweigth_client=ligthweigth_client
+        self.lightweight_client=lightweight_client
         self.vision_client = vision_client
 
         self.summary_model = SummaryMemory(
-            generation_client=self.ligthweigth_client,
+            generation_client=self.lightweight_client,
             template_parser=self.template_parser
         )
-        self.prompt_injuction = PromptInjectionDetector(
-            generation_client=self.ligthweigth_client,
+        self.prompt_injection_detector = PromptInjectionDetector(
+            generation_client=self.lightweight_client,
             template_parser=self.template_parser
+        )
+
+        self.metadata_filter_extractor = MetadataFilterExtractor(
+            generation_client=self.lightweight_client,
+            template_parser=self.template_parser,
         )
 
         tool_registry = ToolRegistry()
@@ -105,7 +107,7 @@ class NLPController(BaseController):
     async def index_into_vector_db(self, project: Project,
                                   chunks: List[Chunk],
                                   do_reset: bool=False,
-                                  chunks_ids: List[int]=None):
+                                  chunks_ids: List[int] | None= None):
 
 
         # 1) get collection name
@@ -238,13 +240,9 @@ class NLPController(BaseController):
             return [], {}
         
         #step3: extract metadata filters from user query
-        metadata_filter = MetadataFilterExtractor(
-            generation_client=self.ligthweigth_client,
-            template_parser=self.template_parser
-        )
-        filters =  metadata_filter.extract(
+        filters = self.metadata_filter_extractor.extract(
             query=text,
-            available_fields=FILTERABLE_METADATA
+            available_fields=FILTERABLE_METADATA,
         )
 
         filters = self.validate_metadata_filters(
@@ -274,6 +272,11 @@ class NLPController(BaseController):
             limit=limit,
             filters=filters,
         )
+
+        # double check on return status
+        vector_results = vector_results or []
+        keyword_results = keyword_results or []
+        numeric_results = numeric_results or []
 
         merged_results = self.merge_results(
             vector_results=vector_results,
@@ -374,7 +377,7 @@ class NLPController(BaseController):
                                          query: str,
                                          limit: int=10,
                                          retrieval_limit: int = 20,
-                                         chat_history: list = None):
+                                         chat_history: list | None = None):
 
         if chat_history is None:
             chat_history = []
@@ -402,7 +405,7 @@ class NLPController(BaseController):
         )
 
         if not reranked_documents or len(reranked_documents) == 0:
-            return answer, full_prompt, chat_history, [], filters
+            return answer, full_prompt, chat_history, [], filters, []
 
         # 3) Keep only the top-k reranked documents
         retrieved_documents = reranked_documents[:limit]
@@ -504,37 +507,30 @@ class NLPController(BaseController):
         return "\n".join(history)
 
 
+    
     async def extract_image_context(
         self,
-        image: UploadFile
+        image: UploadFile,
     ) -> str:
-
-        suffix = Path(
-            image.filename or ""
-        ).suffix or ".png"
-
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix
-        ) as temp_file:
-
-            temp_file.write(
-                await image.read()
-            )
-
-            image_path = temp_file.name
+        suffix = Path(image.filename or "").suffix or ".png"
+        image_path = None
 
         try:
-            vision_context = (
-                await self.vision_client.extract_text_from_image(
-                    image=image_path
-                )
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix,
+            ) as temp_file:
+                image_path = Path(temp_file.name)
+                temp_file.write(await image.read())
+
+            return await self.vision_client.extract_text_from_image(
+                image=str(image_path),
             )
 
-            return vision_context
-
         finally:
-            os.remove(image_path)
+            if image_path is not None:
+                image_path.unlink(missing_ok=True)
+
 
 
     async def _build_query_with_vision(self, query: str, image: UploadFile | None) -> str:
@@ -568,7 +564,7 @@ class NLPController(BaseController):
             }
         )
 
-        rewritten_query = self.ligthweigth_client.generate_text(
+        rewritten_query = self.lightweight_client.generate_text(
             prompt=query_rewriter_prompt,
             chat_history=[]
         )
@@ -577,58 +573,8 @@ class NLPController(BaseController):
 
 
     def _detect_injection(self, query: str) -> dict:
-        return self.prompt_injuction.detect(query=query)
+        return self.prompt_injection_detector.detect(query=query)
     
-
-    async def generate_conversation_title(
-        lightweight_client,
-        template_parser,
-        user_message: str,
-    ) -> str | None:
-        conversation_title_prompt = template_parser.get(
-                    group="rag",
-                    key="conversation_title_prompt",
-                    vars={
-                        "user_message":user_message 
-                    }
-                )
-
-        try:
-            result = await lightweight_client.generate_text(
-                prompt=conversation_title_prompt,
-                chat_history=[],
-            )
-
-            if isinstance(result, str):
-                title = result
-            elif isinstance(result, dict):
-                title = (
-                    result.get("text")
-                    or result.get("content")
-                    or result.get("answer")
-                    or result.get("generated_text")
-                )
-            else:
-                title = (
-                    getattr(result, "text", None)
-                    or getattr(result, "content", None)
-                )
-
-            if not isinstance(title, str):
-                return None
-
-            title = title.strip().strip('"').strip("'")
-            title = title.replace("\n", " ").strip()
-
-            if not title or len(title) > 120:
-                return None
-
-            return title
-
-        except Exception:
-            return None
-            
-
     async def answer_chat_question(
     self,
     project: Project,

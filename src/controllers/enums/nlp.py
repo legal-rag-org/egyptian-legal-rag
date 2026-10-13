@@ -9,13 +9,15 @@ class ProcessControllerEnums(Enum):
         "يرجى إعادة صياغة السؤال أو تقديم مزيد من التفاصيل."
     )
 
-    base_metadata = {
-        "source": "قانون رقم 207 لسنة 2020 بإصدار قانون الجمارك محدثًا حتى عام 2024",
+
+    BASE_METADATA = {
         "domain": "customs",
+        "source": "قانون الجمارك الصادر بالقانون رقم 207 لسنة 2020",
         "document_type": "law",
         "law_number": "207",
         "law_year": "2020",
         "language": "ar",
+        "file_url": "https://customs.gov.eg/Upload/ECAAdminace/ECAAdminace474457860.pdf",
     }
 
     ALLOWED_METADATA_VALUES = {
