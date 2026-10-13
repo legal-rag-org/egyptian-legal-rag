@@ -1,6 +1,5 @@
 from .BaseDataModel import BaseDataModel
 from models import Asset
-from models import DataBaseEnum
 from sqlalchemy import func, select, delete
 
 
