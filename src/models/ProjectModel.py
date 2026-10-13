@@ -46,13 +46,13 @@ class ProjectModel(BaseDataModel):
 
             return project
 
-    async def get_all_projects(self, page_no: int=1, page_size: int=10):
+    async def get_all_projects(self, page_no: int = 1, page_size: int = 10):
 
         if page_no < 1:
-                 raise ValueError("page must be >= 1")
+            raise ValueError("page_no must be >= 1")
 
-        if page_size < 1:
-                raise ValueError("page_size must be >= 1")
+        if not 1 <= page_size <= 100:
+            raise ValueError("page_size must be between 1 and 100")
 
         async with self.db_client() as session:
             
