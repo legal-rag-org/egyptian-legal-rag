@@ -2,6 +2,8 @@ from .BaseDataModel import BaseDataModel
 from .db_schemes.insurance_rag.schemes import Conversation
 from sqlalchemy import func, select, delete
 
+from uuid import UUID
+
 class ConversationModel(BaseDataModel):
 
     def __init__(self, db_client : object):
@@ -23,31 +25,9 @@ class ConversationModel(BaseDataModel):
         return conversation
     
 
-    async def get_conversation_or_create_one(self, conversation_uuid: int):
-    
-            async with self.db_client() as session:
-                async with session.begin():
-    
-                    search_stmt = select(Conversation).where(
-                         Conversation.conversation_uuid == conversation_uuid
-                    )
-    
-                    result = await session.execute(search_stmt)
-                    conversation = result.scalar_one_or_none()
-    
-                    if conversation is None:
-                        conversation = Conversation(
-                            conversation_uuid=conversation_uuid
-                        )
-                        session.add(conversation)
-    
-                await session.refresh(conversation)
-    
-                return conversation
-
     async def get_conversation_by_uuid_and_project_id(
                     self,
-                    conversation_uuid,
+                    conversation_uuid : UUID,
                     project_id: int
         ):
         async with self.db_client() as session:
@@ -66,7 +46,7 @@ class ConversationModel(BaseDataModel):
         self,
         project_id: int,
         user_id: int,
-        conversation_uuid=None,
+        conversation_uuid: UUID | None = None,
         title: str = "محادثة جديدة",
     ):
         if conversation_uuid is not None:
@@ -93,20 +73,25 @@ class ConversationModel(BaseDataModel):
 
         
 
-    async def get_conversation(self, conversation_id: int):
-            async with self.db_client() as session:
     
-                   search_stmt = select(Conversation).where(
-                        Conversation.conversation_id == conversation_id
-                   )
-                   result = await session.execute(search_stmt)
-    
-                   conversation = result.scalar_one_or_none()
-    
-            return conversation
+    async def get_conversation(
+        self,
+        conversation_id: int,
+    ):
+        async with self.db_client() as session:
+            stmt = select(Conversation).where(
+                Conversation.conversation_id == conversation_id
+            )
+
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
     
 
-    async def insert_many_conversations(self, conversations: list, batch_size: int=100):
+    async def insert_many_conversations(self, conversations: list, batch_size: int = 100):
+
+        if batch_size < 1:
+             raise ValueError("batch_size must be >= 1")
     
         async with self.db_client() as session:
                 async with session.begin():
@@ -134,10 +119,10 @@ class ConversationModel(BaseDataModel):
                                                  page_size: int=50):
     
             if page_no < 1:
-                raise ValueError("page must be >= 1")
-    
-            if page_size < 1:       
-                raise ValueError("page_size must be >= 1")
+                raise ValueError("page_no must be >= 1")
+
+            if not 1 <= page_size <= 100:
+                raise ValueError("page_size must be between 1 and 100")
     
             async with self.db_client() as session:
                   
@@ -208,7 +193,7 @@ class ConversationModel(BaseDataModel):
         if page_no < 1:
             raise ValueError("page_no must be >= 1")
 
-        if page_size < 1 or page_size > 100:
+        if not 1 <= page_size <= 100:
             raise ValueError("page_size must be between 1 and 100")
 
         async with self.db_client() as session:
@@ -232,7 +217,7 @@ class ConversationModel(BaseDataModel):
 
     async def get_conversation_by_uuid_project_and_user(
         self,
-        conversation_uuid,
+        conversation_uuid: UUID,
         project_id: int,
         user_id: int,
     ):
@@ -246,28 +231,3 @@ class ConversationModel(BaseDataModel):
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
-
-    async def update_title(
-        self,
-        conversation_id: int,
-        title: str,
-    ):
-        async with self.db_client() as session:
-            async with session.begin():
-                stmt = select(Conversation).where(
-                    Conversation.conversation_id == conversation_id
-                )
-
-                result = await session.execute(stmt)
-                conversation = result.scalar_one_or_none()
-
-                if conversation is None:
-                    raise ValueError(
-                        f"Conversation {conversation_id} not found."
-                    )
-
-                conversation.title = title
-
-            await session.refresh(conversation)
-
-        return conversation
