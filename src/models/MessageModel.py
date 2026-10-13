@@ -38,6 +38,9 @@ class MessageModel(BaseDataModel):
 
 
     async def insert_many_messages(self, messages: list, batch_size: int=100):
+
+        if batch_size < 1:
+                     raise ValueError("batch_size must be >= 1")
         
         async with self.db_client() as session:
                 async with session.begin():
@@ -65,10 +68,10 @@ class MessageModel(BaseDataModel):
                                                      page_size: int=50):
         
                 if page_no < 1:
-                    raise ValueError("page must be >= 1")
-        
-                if page_size < 1:       
-                    raise ValueError("page_size must be >= 1")
+                    raise ValueError("page_no must be >= 1")
+
+                if not 1 <= page_size <= 100:
+                    raise ValueError("page_size must be between 1 and 100")
         
                 async with self.db_client() as session:
                       
