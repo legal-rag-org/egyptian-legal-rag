@@ -3,7 +3,7 @@ from stores.vectordb.VectorDBEnums import DistanceMethodEnums
 from chromadb import PersistentClient
 from models.db_schemes import RetrievedDocument
 from rank_bm25 import BM25Okapi
-from helpers.metadata import FILTERABLE_METADATA
+from controllers.enums.nlp import NLPControllerEnums
 import logging
 from typing import List
 import uuid
@@ -196,7 +196,7 @@ class ChromaDBProvider(VectorDBInterface):
 
         for key, value in filters.items():
 
-            if key not in FILTERABLE_METADATA:
+            if key not in NLPControllerEnums.FILTERABLE_METADATA.value:
                 continue
 
             if isinstance(value, list):
@@ -356,7 +356,7 @@ class ChromaDBProvider(VectorDBInterface):
             filters = {
                 key: value
                 for key, value in filters.items()
-                if key in FILTERABLE_METADATA
+                if key in NLPControllerEnums.FILTERABLE_METADATA.value
             }
 
         results = collection.get(

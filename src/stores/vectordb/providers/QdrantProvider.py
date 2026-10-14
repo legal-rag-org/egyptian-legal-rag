@@ -3,7 +3,7 @@ from ..VectorDBInterface import VectorDBInterface
 from ..VectorDBEnums import DistanceMethodEnums
 from models.db_schemes import RetrievedDocument
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from helpers.metadata import FILTERABLE_METADATA
+from controllers.enums.nlp import NLPControllerEnums
 import logging
 from typing import List
 import re
@@ -188,7 +188,7 @@ class QdrantProvider(VectorDBInterface):
 
             for key, value in filters.items():
 
-                if key not in FILTERABLE_METADATA:
+                if key not in NLPControllerEnums.FILTERABLE_METADATA.value:
                     continue
 
                 if isinstance(value, list):
@@ -270,7 +270,7 @@ class QdrantProvider(VectorDBInterface):
 
             for key, value in filters.items():
 
-                if key not in FILTERABLE_METADATA:
+                if key not in NLPControllerEnums.FILTERABLE_METADATA.value:
                     continue
 
                 if isinstance(value, list):
@@ -381,7 +381,7 @@ class QdrantProvider(VectorDBInterface):
 
             for key, value in filters.items():
 
-                if key not in FILTERABLE_METADATA:
+                if key not in NLPControllerEnums.FILTERABLE_METADATA.value:
                     continue
 
                 if isinstance(value, list):

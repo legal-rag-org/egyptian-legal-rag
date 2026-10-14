@@ -10,7 +10,7 @@ from models import ProcessingEnum
 
 from .BaseController import BaseController
 from .ProjectController import ProjectController
-from .enums.nlp import ProcessControllerEnums
+from .enums.process import ProcessControllerEnums
 from .loaders import PDFTableDetector, TableLoader, PDFTextLayerLoader
 
 
