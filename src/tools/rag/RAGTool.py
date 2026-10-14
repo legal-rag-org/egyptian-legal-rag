@@ -1,5 +1,6 @@
 from ..ToolInterface import ToolInterface
 from services.AgentService import AgentContext
+from .RAGToolEnums import RAGToolEnums
 
 class RAGTool(ToolInterface):
 
@@ -11,21 +12,11 @@ class RAGTool(ToolInterface):
 
     @property
     def name(self) -> str:
-        return "rag_search"
+        return RAGToolEnums.NAME.value
 
     @property
     def description(self) -> str:
-        return (
-            "Search the Egyptian legal knowledge base across all supported legal domains. "
-            "Supported domains include insurance and pensions, labour, tax, companies, "
-            "civil service, customs, and reconciliation related to building violations "
-            "(قانون التصالح في بعض مخالفات البناء). "
-            "Use this tool for questions about Egyptian laws, regulations, legal rights, "
-            "obligations, procedures, eligibility conditions, benefits, penalties, "
-            "exemptions, fees, and other legal provisions. "
-            "Use this tool whenever the user's question requires factual information "
-            "from Egyptian laws or regulations."
-        )
+        return RAGToolEnums.DESCRIPTION.value
 
 
 
