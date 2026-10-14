@@ -14,6 +14,7 @@ class AgentContext:
     retrieval_limit: int = 20
     latitude: float | None = None
     longitude: float | None = None
+    expanded_queries: list[str] = field(default_factory=list)
 
 class AgentService:
 
@@ -26,7 +27,12 @@ class AgentService:
         self.tool_registry = tool_registry
         self.logger = logging.getLogger("uvicorn")
 
-    async def run(self, query: str, context: AgentContext, max_iterations: int = 5):
+    async def run(
+            self,
+            query: str,
+            context: AgentContext,
+            max_iterations: int = 5
+    ):
 
         messages = list(context.chat_history)
 
