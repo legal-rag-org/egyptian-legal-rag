@@ -20,6 +20,9 @@ from tools.rag.RAGTool import RAGTool
 from fastapi import UploadFile
 import tempfile
 from pathlib import Path
+import json
+import asyncio
+
 
 class NLPController(BaseController):
 
@@ -379,42 +382,93 @@ class NLPController(BaseController):
         }
 
 
-    async def answer_rag_questions(self, project: Project,
-                                         query: str,
-                                         limit: int=10,
-                                         retrieval_limit: int = 20,
-                                         chat_history: list | None = None):
+    async def answer_rag_questions(
+        self, project: Project,
+        query: str,
+        limit: int=10,
+        retrieval_limit: int = 20,
+        chat_history: list | None = None,
+        expanded_queries: list[str] | None = None,
+    ):
 
+        
         if chat_history is None:
             chat_history = []
 
-
         answer, full_prompt = None, None
 
-        # 1) retrieve related documents
-        retrieved_documents, filters = await self.search_hybrid(
-            project=project,
-            text=query,
-            limit=retrieval_limit
+        # Combine the tool query with the generated alternative queries.
+        search_queries = list(
+            dict.fromkeys(
+                q.strip()
+                for q in [query, *(expanded_queries or [])]
+                if isinstance(q, str) and q.strip()
+            )
         )
 
-        if not retrieved_documents or len(retrieved_documents) == 0:
+        # Search using all queries concurrently.
+        search_results = await asyncio.gather(
+            *[
+                self.search_hybrid(
+                    project=project,
+                    text=search_query,
+                    limit=retrieval_limit,
+                )
+                for search_query in search_queries
+            ],
+            return_exceptions=True,
+        )
+        self.logger.info("Search queries: %s", search_queries)
+
+        # Merge results and remove duplicate chunks.
+        retrieved_documents = []
+        seen_documents = set()
+        filters = {}
+
+        for result in search_results:
+            if isinstance(result, Exception):
+                
+                self.logger.error(
+                    "Hybrid search failed for one of the expanded queries: %s",
+                    result,
+                    exc_info=(
+                        type(result),
+                        result,
+                        result.__traceback__,
+                    ),
+                )
+                continue
+
+
+            documents, query_filters = result
+
+            if not filters:
+                filters = query_filters or {}
+
+            for document in documents or []:
+                document_key = document.text
+
+                if document_key in seen_documents:
+                    continue
+
+                seen_documents.add(document_key)
+                retrieved_documents.append(document)
+
+        if not retrieved_documents:
             answer = NLPControllerEnums.NO_AVAILABLE_DOCUMENT_ANSWER.value
-            
             return answer, full_prompt, chat_history, [], filters, []
 
-
-        # 2) Rerank retrieved documents
+        # Rerank the merged results only once.
         reranked_documents = self.reranker_client.rerank(
             query=query,
-            documents=retrieved_documents
+            documents=retrieved_documents,
         )
 
-        if not reranked_documents or len(reranked_documents) == 0:
+        if not reranked_documents:
             return answer, full_prompt, chat_history, [], filters, []
 
-        # 3) Keep only the top-k reranked documents
         retrieved_documents = reranked_documents[:limit]
+
 
         # 4) Build citations
         citations = [
@@ -578,6 +632,48 @@ class NLPController(BaseController):
         return (rewritten_query or rewrite_query).strip()
 
 
+    
+
+    async def _expand_query(self, rewritten_query: str) -> list[str]:
+        query_expansion_prompt = self.template_parser.get(
+            group="rag",
+            key="query_expansion_prompt",
+            vars={"query": rewritten_query},
+        )
+
+        response = self.lightweight_client.generate_text(
+            prompt=query_expansion_prompt,
+            chat_history=[],
+        )
+
+        self.logger.info(f"expanded queries : {response}")
+
+        try:
+            queries = json.loads(response or "[]")
+
+            if (
+                not isinstance(queries, list)
+                or len(queries) != 3
+                or not all(
+                    isinstance(q, str) and q.strip()
+                    for q in queries
+                )
+            ):
+                raise ValueError("Invalid query expansion output")
+
+            # Remove duplicates while preserving order.
+            queries = list(dict.fromkeys(q.strip() for q in queries))
+
+            return queries
+
+        except (json.JSONDecodeError, ValueError, TypeError):
+            self.logger.warning(
+                "Query expansion failed; falling back to rewritten query."
+            )
+            return [rewritten_query]
+
+
+
     def _detect_injection(self, query: str) -> dict:
         return self.prompt_injection_detector.detect(query=query)
     
@@ -625,8 +721,17 @@ class NLPController(BaseController):
             messages=messages
         )
 
-        rewritten_query = await self._rewrite_query(rewrite_query=rewrite_query, rewrite_history=rewrite_history, previous_summary=previous_summary)
+        rewritten_query = await self._rewrite_query(
+            rewrite_query=rewrite_query,
+            rewrite_history=rewrite_history,
+            previous_summary=previous_summary
+        )
 
+        self.logger.info(f"rewritten query {rewritten_query}")
+
+        expanded_queries = await self._expand_query(rewritten_query=rewritten_query)
+
+        self.logger.info(f"expanded_queries : {expanded_queries}")
 
         context = AgentContext(
             project=project,
@@ -635,6 +740,7 @@ class NLPController(BaseController):
             retrieval_limit=retrieval_limit,
             latitude=latitude,
             longitude=longitude,
+            expanded_queries=expanded_queries
         )
         
 
@@ -650,7 +756,7 @@ class NLPController(BaseController):
         citations = agent_result["citations"]
 
         if not answer:
-            return answer, full_prompt, retrieved_documents, chat_history, rewritten_query, filters, citations
+            return answer, full_prompt, retrieved_documents, chat_history, expanded_queries, filters, citations
 
         # 5. Save user message
         user_message = Message(
@@ -707,4 +813,4 @@ class NLPController(BaseController):
             )
 
 
-        return answer, full_prompt, retrieved_documents, chat_history, rewritten_query, filters, citations
+        return answer, full_prompt, retrieved_documents, chat_history, expanded_queries, filters, citations
