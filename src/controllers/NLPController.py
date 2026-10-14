@@ -103,10 +103,12 @@ class NLPController(BaseController):
         return collection_info
 
 
-    async def index_into_vector_db(self, project: Project,
-                                  chunks: List[Chunk],
-                                  do_reset: bool=False,
-                                  chunks_ids: List[int] | None= None):
+    async def index_into_vector_db(
+        self, project: Project,
+        chunks: List[Chunk],
+        do_reset: bool=False,
+        chunks_ids: List[int] | None= None
+    ):
 
 
         # 1) get collection name
@@ -149,7 +151,12 @@ class NLPController(BaseController):
         return is_inserted
 
 
-    async def search_vector_db_collection(self, project: Project, text: str, limit: int = 10):
+    async def search_vector_db_collection(
+        self,
+        project: Project, 
+        text: str, 
+        limit: int = 10
+    ):
 
         # step1: get collection name
         collection_name = self.create_collection_name(project_id=project.project_id)
@@ -444,9 +451,9 @@ class NLPController(BaseController):
         )
 
         system_message = self.generation_client.construct_prompt(
-        prompt=system_prompt,
-        role=self.generation_client.enums.SYSTEM.value
-)
+                prompt=system_prompt,
+                role=self.generation_client.enums.SYSTEM.value
+        )
 
         chat_history = [system_message] + chat_history
 
@@ -575,15 +582,15 @@ class NLPController(BaseController):
         return self.prompt_injection_detector.detect(query=query)
     
     async def answer_chat_question(
-    self,
-    project: Project,
-    conversation,
-    query: str,
-    image: UploadFile | None = None,
-    limit: int = 10,
-    retrieval_limit: int = 20,
-    latitude: float | None = None,
-    longitude: float | None = None
+        self,
+        project: Project,
+        conversation,
+        query: str,
+        image: UploadFile | None = None,
+        limit: int = 10,
+        retrieval_limit: int = 20,
+        latitude: float | None = None,
+        longitude: float | None = None
     ):
         
 
