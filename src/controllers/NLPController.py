@@ -8,8 +8,7 @@ import logging
 from models.db_schemes import RetrievedDocument
 from services.MetadataFilterExtractor import MetadataFilterExtractor
 from services.SummaryMemory import SummaryMemory
-from helpers.metadata import FILTERABLE_METADATA
-from .enums.nlp import ProcessControllerEnums
+from .enums.nlp import NLPControllerEnums
 from services.PromptInjuction import PromptInjectionDetector
 
 from services.AgentService import AgentContext, AgentService
@@ -242,12 +241,12 @@ class NLPController(BaseController):
         #step3: extract metadata filters from user query
         filters = self.metadata_filter_extractor.extract(
             query=text,
-            available_fields=FILTERABLE_METADATA,
+            available_fields=NLPControllerEnums.FILTERABLE_METADATA.value,
         )
 
         filters = self.validate_metadata_filters(
             filters=filters,
-            allowed_values=ProcessControllerEnums.ALLOWED_METADATA_VALUES.value,
+            allowed_values=NLPControllerEnums.ALLOWED_METADATA_VALUES.value,
         )
 
         
@@ -393,7 +392,7 @@ class NLPController(BaseController):
         )
 
         if not retrieved_documents or len(retrieved_documents) == 0:
-            answer = ProcessControllerEnums.NO_AVAILABLE_DOCUMENT_ANSWER.value
+            answer = NLPControllerEnums.NO_AVAILABLE_DOCUMENT_ANSWER.value
             
             return answer, full_prompt, chat_history, [], filters, []
 
@@ -595,7 +594,7 @@ class NLPController(BaseController):
         if injection_result["is_injection"]:
             self.logger.warning("Prompt injection detected: %s", injection_result.get("reason"))
             return (
-                ProcessControllerEnums.PORMPT_INJUCTED_ANSWER.value,
+                NLPControllerEnums.PORMPT_INJUCTED_ANSWER.value,
                 None, [], [], query, {}, []
             )
 

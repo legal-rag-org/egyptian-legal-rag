@@ -2,7 +2,7 @@ from ..VectorDBInterface import VectorDBInterface
 from stores.vectordb.VectorDBEnums import (PgVectorDistanceMetodEnums, PgVectorIndexTypeEnums,
                                             PgVectorTableSchemeEnums, DistanceMethodEnums)
 from models.db_schemes import RetrievedDocument
-from helpers.metadata import FILTERABLE_METADATA
+from controllers.enums.nlp import NLPControllerEnums
 import logging
 from typing import List
 from sqlalchemy.sql import text as sql_text
@@ -397,7 +397,7 @@ class PGVectorProvider(VectorDBInterface):
 
         for index, (key, value) in enumerate(filters.items()):
 
-            if key not in FILTERABLE_METADATA:
+            if key not in NLPControllerEnums.FILTERABLE_METADATA.value:
                 continue
 
             # domain can contain multiple values
