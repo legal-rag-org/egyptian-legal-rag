@@ -330,6 +330,46 @@ query_expansion_prompt = Template("\n".join([
 ]))
 
 
+
+hyde_prompt = Template("\n".join([
+    "You are a hypothetical document generator for an Egyptian legal RAG system.",
+    "",
+    "Your task is to generate one hypothetical legal passage for each input query.",
+    "",
+    "Rules:",
+    "1. You will receive a JSON list containing multiple search queries.",
+    "2. Generate exactly one hypothetical passage for each query.",
+    "3. Preserve the original order: passage at index i must correspond to query at index i.",
+    "4. Write each passage in Arabic, using natural Egyptian legal terminology where appropriate.",
+    "5. Write passages in the style of legal documents, explaining potentially relevant rules,",
+    "   conditions, exceptions, or procedures related to the query.",
+    "6. Do not answer the user directly or address the user.",
+    "7. Do not include citations, article numbers, law numbers, or specific legal facts",
+    "   unless they are explicitly provided in the query or can be stated without guessing.",
+    "8. Do not invent precise legal provisions or present uncertain legal claims as facts.",
+    "9. The passages are hypothetical retrieval aids, not verified legal evidence.",
+    "10. Return ONLY a valid JSON array of strings, with no Markdown or additional text.",
+    "11. The output array must contain exactly the same number of items as the input list.",
+    "",
+    "Example input:",
+    '["ما شروط استحقاق الإجازة السنوية؟",',
+    ' "ما مدة الخدمة المطلوبة للحصول على الإجازة الاعتيادية؟",',
+    ' "كم يوم إجازة سنوية يستحق الموظف في السنة الأولى؟"]',
+    "",
+    "Example output:",
+    '["تحدد التشريعات العمالية شروط استحقاق الإجازة السنوية،',
+    'ومنها مدة الخدمة والضوابط المنظمة لمنح الإجازة.",',
+    ' "تتناول الأحكام القانونية مدة الخدمة المطلوبة لاستحقاق الإجازة الاعتيادية،',
+    'والشروط التي يجب توافرها قبل استحقاقها.",',
+    ' "تنظم التشريعات المستحقة للإجازة السنوية عدد أيام الإجازة في السنة الأولى،',
+    'وفقًا لمدة الخدمة والقانون المنطبق على الموظف."]',
+    "",
+    "Input queries:",
+    "$queries",
+]))
+
+
+
 vision_table_extractor_prompt = Template("\n".join([
 
     "Extract the text contained in the table shown in the image.",

@@ -50,7 +50,7 @@ class RAGTool(ToolInterface):
         limit: int = 10,
         retrieval_limit: int = 20,
         chat_history: list | None = None,
-        expanded_queries: list[str] = None,
+        hyde_passages: list[str] = None,
     ):
 
         if self._rag_handler is None:
@@ -64,7 +64,7 @@ class RAGTool(ToolInterface):
             limit=limit,
             retrieval_limit=retrieval_limit,
             chat_history=chat_history,
-            expanded_queries=expanded_queries,
+            hyde_passages=hyde_passages,
         )
 
     async def execute_with_context(self, arguments: dict, context: AgentContext) -> dict:
@@ -74,7 +74,7 @@ class RAGTool(ToolInterface):
             limit=context.limit,
             retrieval_limit=context.retrieval_limit,
             chat_history=context.chat_history,
-            expanded_queries=context.expanded_queries,
+            hyde_passages=context.hyde_passages,
         )
 
         if not result:
