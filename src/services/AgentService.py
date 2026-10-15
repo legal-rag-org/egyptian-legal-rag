@@ -14,7 +14,7 @@ class AgentContext:
     retrieval_limit: int = 20
     latitude: float | None = None
     longitude: float | None = None
-    expanded_queries: list[str] = field(default_factory=list)
+    hyde_passages: list[str] = field(default_factory=list)
 
 class AgentService:
 
