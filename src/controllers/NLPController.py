@@ -388,7 +388,7 @@ class NLPController(BaseController):
         limit: int=10,
         retrieval_limit: int = 20,
         chat_history: list | None = None,
-        expanded_queries: list[str] | None = None,
+        hyde_passages: list[str] | None = None,
     ):
 
         
@@ -401,7 +401,7 @@ class NLPController(BaseController):
         search_queries = list(
             dict.fromkeys(
                 q.strip()
-                for q in [query, *(expanded_queries or [])]
+                for q in [query, *(hyde_passages or [])]
                 if isinstance(q, str) and q.strip()
             )
         )
@@ -673,6 +673,51 @@ class NLPController(BaseController):
             return [rewritten_query]
 
 
+    async def _hyde_queries(
+        self,
+        expanded_queries: list[str],
+    ) -> list[str]:
+        """Generate one hypothetical passage per expanded query in a single LLM call."""
+
+        hyde_prompt = self.template_parser.get(
+            group="rag",
+            key="hyde_prompt",
+            vars={
+                "queries": json.dumps(
+                    expanded_queries,
+                    ensure_ascii=False,
+                )
+            },
+        )
+
+        response = self.lightweight_client.generate_text(
+            prompt=hyde_prompt,
+            chat_history=[],
+        )
+
+        try:
+            hyde_passages = json.loads(response or "[]")
+
+            if (
+                not isinstance(hyde_passages, list)
+                or len(hyde_passages) != len(expanded_queries)
+                or not all(
+                    isinstance(passage, str) and passage.strip()
+                    for passage in hyde_passages
+                )
+            ):
+                raise ValueError("Invalid HyDE output")
+
+            return [passage.strip() for passage in hyde_passages]
+
+        except (json.JSONDecodeError, ValueError, TypeError):
+            self.logger.warning(
+                "HyDE generation failed or returned invalid output."
+            )
+            return expanded_queries
+
+        
+
 
     def _detect_injection(self, query: str) -> dict:
         return self.prompt_injection_detector.detect(query=query)
@@ -733,6 +778,12 @@ class NLPController(BaseController):
 
         self.logger.info(f"expanded_queries : {expanded_queries}")
 
+        hyde_passages = await self._hyde_queries(
+            expanded_queries=expanded_queries
+        )
+
+        self.logger.info("HyDE passages: %s", hyde_passages)
+
         context = AgentContext(
             project=project,
             chat_history=chat_history,
@@ -740,7 +791,7 @@ class NLPController(BaseController):
             retrieval_limit=retrieval_limit,
             latitude=latitude,
             longitude=longitude,
-            expanded_queries=expanded_queries
+            hyde_passages=hyde_passages
         )
         
 
@@ -756,7 +807,7 @@ class NLPController(BaseController):
         citations = agent_result["citations"]
 
         if not answer:
-            return answer, full_prompt, retrieved_documents, chat_history, expanded_queries, filters, citations
+            return answer, full_prompt, retrieved_documents, chat_history, hyde_passages, filters, citations
 
         # 5. Save user message
         user_message = Message(
@@ -813,4 +864,4 @@ class NLPController(BaseController):
             )
 
 
-        return answer, full_prompt, retrieved_documents, chat_history, expanded_queries, filters, citations
+        return answer, full_prompt, retrieved_documents, chat_history, hyde_passages, filters, citations
