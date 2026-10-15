@@ -161,6 +161,49 @@ Do not commit files containing secrets, API keys, or real credentials to the rep
 
 For additional details, see the [Docker documentation](docker/README.md).
 
+## Ollama Configuration
+
+The application can use a locally running Ollama instance as its language model provider without running Ollama inside Docker.
+
+### 1. Install Ollama
+
+Install [Ollama](https://ollama.com/download) on the host machine and make sure its service is running.
+
+### 2. Pull the Model
+
+For example, to use `qwen3:1.7b`:
+
+```bash
+ollama pull qwen3:1.7b
+```
+
+Verify that the model is available:
+
+```bash
+ollama list
+```
+
+### 3. Configure the Application
+
+Set the following variable in the application environment file:
+
+```env
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+```
+
+When running FastAPI inside Docker on Linux or WSL, configure the Compose service to resolve the host gateway:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+Ollama must listen on an address reachable from the Docker container. The exact configuration depends on the host operating system and installation method.
+
+**Important:** This configuration assumes Ollama is installed and running on the same host as Docker. Anyone deploying the application on another machine must install Ollama and pull the configured model, or configure a different supported language model provider.
+
+The Ollama model is stored separately from the Docker image, so it does not need to be downloaded as part of the application image.
+
 ## Run Docker Compose Services
 
 Docker Compose runs the FastAPI application and its supporting services, including PostgreSQL with pgvector, Qdrant, and the monitoring stack.

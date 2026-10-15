@@ -26,8 +26,8 @@ class OpenAiProvider(LLMInterface):
         self.embedding_size = None
 
         self.client = OpenAI(
-            api_key = self.api_key,
-            base_url = self.api_url
+            api_key=self.api_key,
+            base_url=f"{self.api_url}/v1",
         )
 
         self.enums = OpenAIEnums
