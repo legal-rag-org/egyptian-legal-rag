@@ -233,8 +233,6 @@ class NLPController(BaseController):
         text: str,
         limit: int = 20
     ):
-
-        
         collection_name = self.create_collection_name(
             project_id=project.project_id
         )
@@ -593,7 +591,7 @@ class NLPController(BaseController):
 
 
 
-    async def _build_query_with_vision(self, query: str, image: UploadFile | None) -> str:
+    async def _build_query_with_vision(self, query: str, image: UploadFile | None = None) -> str:
         if not image:
             return query
 
@@ -613,7 +611,7 @@ class NLPController(BaseController):
             """.strip()
 
 
-    async def _rewrite_query(self, rewrite_query: str, rewrite_history, previous_summary: str) -> str:
+    async def _rewrite_query(self, rewrite_query: str, rewrite_history: str | None = "", previous_summary: str | None = "") -> str:
         query_rewriter_prompt = self.template_parser.get(
             group="rag",
             key="query_rewriter_prompt",
