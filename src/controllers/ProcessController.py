@@ -11,8 +11,29 @@ from models import ProcessingEnum
 from .BaseController import BaseController
 from .ProjectController import ProjectController
 from .enums.process import ProcessControllerEnums
-from .loaders import PDFTableDetector, TableLoader, PDFTextLayerLoader
+from .loaders import PDFTableDetector, TableLoader, PDFTextLayerLoader, PDF2TextArabicLoader, QalamLoader
 
+import qalam
+
+ARTICLE_WORDS = r"(?:المادة|الماده|مادة|ماده)"
+ORDINALS = (
+    r"(?:الأولى|الأولي|الاولى|الاولي|الثانية|الثانيه|الثالثة|الثالثه|"
+    r"الرابعة|الرابعه|الخامسة|الخامسه|السادسة|السادسه|"
+    r"السابعة|السابعه|الثامنة|الثامنه|التاسعة|التاسعه|العاشرة|العاشره)"
+)
+NUM = r"[0-9٠-٩۰-۹]+"
+
+ARTICLE_PATTERN = re.compile(
+    rf"""
+    ^[ \t]*[()\[\]]*[ \t]*
+    {ARTICLE_WORDS}
+    [ \t]*[()\[\]]*[ \t]*
+    (?:رقم[ \t]*)?
+    ({NUM}|{ORDINALS})
+    [ \t]*[()\[\]:.\-]*[ \t]*$
+    """,
+    re.MULTILINE | re.VERBOSE,
+)
 
 @dataclass
 class Document:
@@ -64,17 +85,18 @@ class ProcessController(BaseController):
 
         return None
 
+    def clean_arabic(self, text: str) -> str:
+        text = text.replace("ی", "ي").replace("ک", "ك")
+        text = self.normalize_digits(text)
+        lines = [
+            l for l in text.splitlines()
+            if not re.search(r"(.)\1{2,}", l.replace(" ", "")) or len(l) > 60
+        ]
+        return "\n".join(lines)
+
     def normalize_text(self, text: str) -> str:
-
-        lines = []
-
-        for line in text.splitlines():
-
-            line = line.strip()
-
-            if len(line) > 1:
-                lines.append(line)
-
+        text = self.clean_arabic(text)
+        lines = [l.strip() for l in text.splitlines() if len(l.strip()) >= 1]
         return "\n".join(lines)
 
     async def process_file_content(self, file_id: str,
@@ -279,14 +301,8 @@ class ProcessController(BaseController):
             article_metadata["article"] = article_num
 
             # Article header
-            article_match = re.match(
-                r"(?:مادة|ﻣﺎﺩﺓ)"
-                r"\s*\("
-                r"\s*[0-9٠-٩۰-۹]+\s*"
-                r"\)"
-                r"\s*:?",
-                article_text
-            )
+            article_match = ARTICLE_PATTERN.match(article_text)
+
 
             if article_match:
                 article_header = article_match.group().strip()
@@ -335,26 +351,9 @@ class ProcessController(BaseController):
         return text.translate(translation)
 
 
+    
     def split_by_articles(self, text: str):
-
-        pattern = (
-            r"(?:مادة|ﻣﺎﺩﺓ)"
-            r"\s*"
-            r"\("
-            r"\s*"
-            r"([0-9٠-٩۰-۹]+)"
-            r"\s*"
-            r"\)"
-            r"\s*:"
-        )
-
-        matches = list(
-            re.finditer(
-                pattern,
-                text,
-                flags=re.IGNORECASE
-            )
-        )
+        matches = list(ARTICLE_PATTERN.finditer(text))
 
         if not matches:
             return [("unknown", text)]
@@ -362,31 +361,19 @@ class ProcessController(BaseController):
         sections = []
 
         for index, match in enumerate(matches):
-
-            article_number = self.normalize_digits(
-                match.group(1)
-            )
+            article_number = self.normalize_digits(match.group(1))
 
             start = match.start()
-
             end = (
                 matches[index + 1].start()
                 if index + 1 < len(matches)
                 else len(text)
             )
 
-            article_text = text[
-                start:end
-            ].strip()
-
-            sections.append(
-                (
-                    article_number,
-                    article_text
-                )
-            )
+            sections.append((article_number, text[start:end].strip()))
 
         return sections
+
 
 
     def split_large_section(
@@ -462,93 +449,21 @@ class ProcessController(BaseController):
             file_id
         )
 
-        table_detector = PDFTableDetector(
-            file_path=file_path
+
+        pdf_loader = QalamLoader(
+            file_path=file_path,
         )
 
-        table_pages = table_detector.detect_table_pages()
+        pdf_documents = pdf_loader.load()
 
         self.logger.info(
-            f"Detected table pages: {table_pages}"
+            f"Number of normal docs: {len(pdf_documents)}"
         )
-
-        pdftextlayerloader = PDFTextLayerLoader(
-            file_path=file_path,
-            excluded_pages=table_pages,
-        )
-
-        normal_documents = pdftextlayerloader.load()
-
-        self.logger.info(
-            f"Number of normal docs: {len(normal_documents)}"
-        )
-
-        table_loader = TableLoader(
-            file_path=file_path,
-            dpi=150
-        )
-
-        table_documents = []
-
-         # Process each table page individually
-        for page_number in table_pages:
-
-              image_path = None
-
-              try:
-
-                  self.logger.info(
-                      f"Starting vision page: {page_number}"
-                  )
-
-                  image_path = table_loader.render_page(
-                      page_number=page_number
-                  )
-
-                  self.logger.info(
-                      f"Rendered page: {page_number}"
-                  )
-
-                  texts = await self.vision_model.extract(
-                      images=[image_path]
-                  )
-
-                  text = texts[0] if texts else ""
-
-                  self.logger.info(
-                      f"Vision extraction finished for page: {page_number}"
-                  )
-
-                  if not text.strip():
-                      continue
-
-                  table_documents.append(
-                    Document(
-                          page_content=text,
-                          metadata={
-                              **base_metadata,
-                              "page": page_number,
-                              "content_type": "table",
-                          },
-                      )
-                  )
-
-              except Exception as e:
-
-                  self.logger.error(
-                      f"Error processing page {page_number}: {e}",
-                      exc_info=True,
-                  )
-
-              finally:
-
-                  if image_path and os.path.exists(image_path):
-                      os.unlink(image_path)
-
+    
          # 4. Process normal text
         documents = []
 
-        for page in normal_documents:
+        for page in pdf_documents:
 
             text = self.normalize_text(
                 page.page_content
@@ -572,6 +487,5 @@ class ProcessController(BaseController):
             documents.extend(page_documents)
 
         # 5. Add tables
-        documents.extend(table_documents)
 
         return documents
