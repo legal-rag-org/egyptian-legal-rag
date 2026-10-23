@@ -26,7 +26,7 @@ import asyncio
 
 class NLPController(BaseController):
 
-    def __init__(self, vectordb_client, 
+    def __init__(self, vectordb_client,
                        generation_client,
                        embedding_client,
                        template_parser,
@@ -35,7 +35,7 @@ class NLPController(BaseController):
                        conversation_model,
                        lightweight_client,
                        vision_client):
-        
+
         super().__init__()
 
         self.vectordb_client = vectordb_client
@@ -156,8 +156,8 @@ class NLPController(BaseController):
 
     async def search_vector_db_collection(
         self,
-        project: Project, 
-        text: str, 
+        project: Project,
+        text: str,
         limit: int = 10
     ):
 
@@ -165,7 +165,7 @@ class NLPController(BaseController):
         collection_name = self.create_collection_name(project_id=project.project_id)
 
         # step2: get text embedding vector
-        query_vector = self.embedding_client.embed_text(text=text, 
+        query_vector = self.embedding_client.embed_text(text=text,
                                                  document_type=DocumentTypeEnum.QUERY.value)
 
 
@@ -257,7 +257,6 @@ class NLPController(BaseController):
             allowed_values=NLPControllerEnums.ALLOWED_METADATA_VALUES.value,
         )
 
-        
 
         vector_results = await self.vectordb_client.search_by_vector(
             collection_name=collection_name,
@@ -302,27 +301,27 @@ class NLPController(BaseController):
             limit: int = 20,
             k: int = 60
         ) -> List[RetrievedDocument]:
-    
+
             scores = {}
             documents = {}
-    
+
             for rank, document in enumerate(vector_results, start=1):
-    
+
                 document_id = document.text
-    
+
                 documents[document_id] = document
-    
+
                 scores[document_id] = scores.get(
                     document_id,
                     0
                 ) + (1 / (k + rank))
-    
+
             for rank, document in enumerate(keyword_results, start=1):
-    
+
                 document_id = document.text
-    
+
                 documents[document_id] = document
-    
+
                 scores[document_id] = scores.get(
                     document_id,
                     0
@@ -338,13 +337,13 @@ class NLPController(BaseController):
                     document_id,
                     0,
                 ) + (1 / (k + rank))
-    
+
             ranked_documents = sorted(
                 documents.items(),
                 key=lambda x: scores[x[0]],
                 reverse=True
             )
-    
+
             return [
                 documents[document_id]
                 for document_id, _ in ranked_documents[:limit]
@@ -389,7 +388,7 @@ class NLPController(BaseController):
         hyde_passages: list[str] | None = None,
     ):
 
-        
+
         if chat_history is None:
             chat_history = []
 
@@ -425,7 +424,7 @@ class NLPController(BaseController):
 
         for result in search_results:
             if isinstance(result, Exception):
-                
+
                 self.logger.error(
                     "Hybrid search failed for one of the expanded queries: %s",
                     result,
@@ -529,7 +528,7 @@ class NLPController(BaseController):
 
 
     def build_chat_history(self, messages: list):
-    
+
         chat_history = []
 
         for message in messages:
@@ -565,7 +564,7 @@ class NLPController(BaseController):
         return "\n".join(history)
 
 
-    
+
     async def extract_image_context(
         self,
         image: UploadFile,
@@ -630,7 +629,7 @@ class NLPController(BaseController):
         return (rewritten_query or rewrite_query).strip()
 
 
-    
+
 
     async def _expand_query(self, rewritten_query: str) -> list[str]:
         query_expansion_prompt = self.template_parser.get(
@@ -714,12 +713,12 @@ class NLPController(BaseController):
             )
             return expanded_queries
 
-        
+
 
 
     def _detect_injection(self, query: str) -> dict:
         return self.prompt_injection_detector.detect(query=query)
-    
+
     async def answer_chat_question(
         self,
         project: Project,
@@ -731,7 +730,7 @@ class NLPController(BaseController):
         latitude: float | None = None,
         longitude: float | None = None
     ):
-        
+
 
         rewrite_query = await self._build_query_with_vision(query=query, image=image)
 
@@ -791,7 +790,7 @@ class NLPController(BaseController):
             longitude=longitude,
             hyde_passages=hyde_passages
         )
-        
+
 
         # 4. Run RAG
         agent_result = await self.agent_service.run(
