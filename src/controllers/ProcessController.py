@@ -11,7 +11,7 @@ from models import ProcessingEnum
 from .BaseController import BaseController
 from .ProjectController import ProjectController
 from .enums.process import ProcessControllerEnums
-from .loaders import PDFTableDetector, TableLoader, PDFTextLayerLoader, PDF2TextArabicLoader, QalamLoader
+from .loaders import PDFTableDetector, TableLoader, PDFTextLayerLoader, DeepSeekOCRLoader
 
 import qalam
 
@@ -41,13 +41,14 @@ class Document:
     metadata: dict[str, Any]
 
 class ProcessController(BaseController):
-    def __init__(self, project_id: str, vision_model):
+    def __init__(self, project_id: str, vision_model, ocr_client):
         super().__init__()
 
         self.project_id = project_id
         self.project_path = ProjectController().get_project_path(project_id=project_id)
         self.logger = logging.getLogger("uvicorn.error")
         self.vision_model = vision_model
+        self.ocr_client = ocr_client
 
 
     def get_file_extension(self, file_id: str):
@@ -450,11 +451,12 @@ class ProcessController(BaseController):
         )
 
 
-        pdf_loader = QalamLoader(
+        pdf_loader = DeepSeekOCRLoader(
             file_path=file_path,
+            ocr_client=self.ocr_client,
         )
 
-        pdf_documents = pdf_loader.load()
+        pdf_documents = await pdf_loader.aload()
 
         self.logger.info(
             f"Number of normal docs: {len(pdf_documents)}"
