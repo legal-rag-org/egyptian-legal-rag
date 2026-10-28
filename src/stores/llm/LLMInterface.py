@@ -12,15 +12,16 @@ class LLMInterface(ABC):
         pass
 
     @abstractmethod
-    def generate_text(self,
-                      prompt: str,
-                      chat_history: list=[],
-                      max_output_tokens: int=None,
-                      temperature: float= None):
+    async def generate_text(self,
+                              prompt: str,
+                              chat_history: list | None = None,
+                              max_output_tokens: int=None,
+                              temperature: float= None):
+    
         pass
 
     @abstractmethod
-    def generate_with_tools(
+    async def generate_with_tools(
         self,
         messages: list,
         tools: list,
@@ -30,7 +31,7 @@ class LLMInterface(ABC):
         pass
 
     @abstractmethod
-    def embed_text(self,
+    async def embed_text(self,
                    text: str,
                    document_type: str=None):
         pass

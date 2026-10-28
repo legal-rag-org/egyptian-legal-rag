@@ -9,7 +9,7 @@ class MetadataFilterExtractor:
         self.template_parser = template_parser
         self.logger = logging.getLogger("uvicorn.error")
 
-    def extract(
+    async def extract(
         self,
         query: str,
         available_fields: list[str]
@@ -25,7 +25,7 @@ class MetadataFilterExtractor:
         )
 
         try:
-            response =  self.generation_client.generate_text(
+            response =  await self.generation_client.generate_text(
                 prompt=metadata_filter_extractor_prompt
             )
 

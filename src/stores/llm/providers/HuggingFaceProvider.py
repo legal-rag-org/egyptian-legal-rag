@@ -41,8 +41,13 @@ class HuggingFaceProvider(LLMInterface):
             
             return text[:self.default_input_max_character].strip()
 
-     def generate_text(self, prompt: str, chat_history: list=[], max_output_tokens: int = None,
-                          temperature: float = None):
+     async def generate_text(self,
+                               prompt: str,
+                               chat_history: list | None = None,
+                               max_output_tokens: int=None,
+                               temperature: float= None):
+     
+            chat_history = list(chat_history or [])
 
             if not self.client:
                   self.logger.error("The HuggingFace client was not set")
@@ -79,7 +84,7 @@ class HuggingFaceProvider(LLMInterface):
 
             return response.choices[0].message.content
 
-     def generate_with_tools(
+     async def generate_with_tools(
        self,
        messages: list,
        tools: list,
@@ -145,7 +150,7 @@ class HuggingFaceProvider(LLMInterface):
        return response.choices[0].message
      
 
-     def embed_text(self, text: Union[str, List[str]], document_type: str = None):      
+     async def embed_text(self, text: Union[str, List[str]], document_type: str = None):      
             if not self.client:
                    self.logger.error("The HuggingFace client was not set")
                    return None

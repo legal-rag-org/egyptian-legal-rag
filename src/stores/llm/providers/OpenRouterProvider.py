@@ -1,7 +1,7 @@
 from ..LLMInterface import LLMInterface
 from ..LLMEnums import OpenRouterEnum
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 import logging
 from typing import List, Union
@@ -32,7 +32,7 @@ class OpenRouterProvider(LLMInterface):
         self.embedding_model_id = None
         self.embedding_size = None
 
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=self.api_url,
         )
@@ -59,13 +59,13 @@ class OpenRouterProvider(LLMInterface):
             else text[:self.default_input_max_characters].strip()
         )
 
-    def generate_text(
-        self,
-        prompt: str,
-        chat_history: list = None,
-        max_output_tokens: int = None,
-        temperature: float = None,
-    ):
+    async def generate_text(self,
+                              prompt: str,
+                              chat_history: list | None = None,
+                              max_output_tokens: int=None,
+                              temperature: float= None):
+    
+        chat_history = list(chat_history or [])
 
         if not self.client:
             self.logger.error("OpenRouter client was not set")
@@ -80,17 +80,8 @@ class OpenRouterProvider(LLMInterface):
         if chat_history is None:
             chat_history = []
 
-        max_output_tokens = (
-            max_output_tokens
-            if max_output_tokens
-            else self.default_generation_output_max_tokens
-        )
-
-        temperature = (
-            temperature
-            if temperature is not None
-            else self.default_generation_temperature
-        )
+        max_output_tokens = max_output_tokens if max_output_tokens is not None else self.default_generation_output_max_tokens
+        temperature = temperature if temperature is not None else self.default_generation_temperature
 
         chat_history.append(
             self.construct_prompt(
@@ -99,7 +90,7 @@ class OpenRouterProvider(LLMInterface):
             )
         )
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.generation_model_id,
             messages=chat_history,
             max_tokens=max_output_tokens,
@@ -122,7 +113,7 @@ class OpenRouterProvider(LLMInterface):
 
         return response.choices[0].message.content
 
-    def generate_with_tools(
+    async def generate_with_tools(
         self,
         messages: list,
         tools: list,
@@ -152,7 +143,7 @@ class OpenRouterProvider(LLMInterface):
             else self.default_generation_temperature
         )
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.generation_model_id,
             messages=messages,
             tools=tools,
@@ -176,8 +167,10 @@ class OpenRouterProvider(LLMInterface):
             return None
 
         return response.choices[0].message
+    
+    
 
-    def embed_text(
+    async def embed_text(
         self,
         text: Union[str, List[str]],
         document_type: str = None,
@@ -196,7 +189,7 @@ class OpenRouterProvider(LLMInterface):
         if isinstance(text, str):
             text = [text]
 
-        response = self.client.embeddings.create(
+        response = await self.client.embeddings.create(
             model=self.embedding_model_id,
             input=text,
         )

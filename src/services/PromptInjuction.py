@@ -13,7 +13,7 @@ class PromptInjectionDetector:
         self.logger = logging.getLogger("uvicorn.error")
 
 
-    def detect(self, query: str) -> bool:
+    async def detect(self, query: str) -> bool:
 
         if not query or not query.strip():
             return False
@@ -27,7 +27,7 @@ class PromptInjectionDetector:
         )
 
         try:
-            response = self.generation_client.generate_text(
+            response = await self.generation_client.generate_text(
                 prompt=prompt_injection_detector_prompt,
             )
 
