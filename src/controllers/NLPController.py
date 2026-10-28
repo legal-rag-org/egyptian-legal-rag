@@ -122,7 +122,7 @@ class NLPController(BaseController):
         # 2) manage items
         texts = [c.chunk_text for c in chunks]
         metadata = [c.chunk_metadata for c in chunks]
-        vectors = self.embedding_client.embed_text(
+        vectors = await self.embedding_client.embed_text(
                 text=texts,
                 document_type=DocumentTypeEnum.DOCUMENT.value
             )
@@ -238,7 +238,7 @@ class NLPController(BaseController):
         )
 
 
-        query_vector = self.embedding_client.embed_text(
+        query_vector = await self.embedding_client.embed_text(
             text=text,
             document_type=DocumentTypeEnum.QUERY.value
         )
@@ -247,7 +247,7 @@ class NLPController(BaseController):
             return [], {}
         
         #step3: extract metadata filters from user query
-        filters = self.metadata_filter_extractor.extract(
+        filters = await self.metadata_filter_extractor.extract(
             query=text,
             available_fields=NLPControllerEnums.FILTERABLE_METADATA.value,
         )
@@ -515,7 +515,7 @@ class NLPController(BaseController):
         ])
 
 
-        answer = self.generation_client.generate_text(
+        answer = await self.generation_client.generate_text(
             prompt=full_prompt,
             chat_history=chat_history,
 
@@ -621,7 +621,7 @@ class NLPController(BaseController):
             }
         )
 
-        rewritten_query = self.lightweight_client.generate_text(
+        rewritten_query = await self.lightweight_client.generate_text(
             prompt=query_rewriter_prompt,
             chat_history=[]
         )
@@ -638,7 +638,7 @@ class NLPController(BaseController):
             vars={"query": rewritten_query},
         )
 
-        response = self.lightweight_client.generate_text(
+        response = await self.lightweight_client.generate_text(
             prompt=query_expansion_prompt,
             chat_history=[],
         )
@@ -687,7 +687,7 @@ class NLPController(BaseController):
             },
         )
 
-        response = self.lightweight_client.generate_text(
+        response = await self.lightweight_client.generate_text(
             prompt=hyde_prompt,
             chat_history=[],
         )
@@ -716,8 +716,8 @@ class NLPController(BaseController):
 
 
 
-    def _detect_injection(self, query: str) -> dict:
-        return self.prompt_injection_detector.detect(query=query)
+    async def _detect_injection(self, query: str) -> dict:
+        return await self.prompt_injection_detector.detect(query=query)
 
     async def answer_chat_question(
         self,
@@ -734,7 +734,7 @@ class NLPController(BaseController):
 
         rewrite_query = await self._build_query_with_vision(query=query, image=image)
 
-        injection_result = self._detect_injection(rewrite_query)
+        injection_result = await self._detect_injection(rewrite_query)
 
         if injection_result["is_injection"]:
             self.logger.warning("Prompt injection detected: %s", injection_result.get("reason"))
@@ -849,7 +849,7 @@ class NLPController(BaseController):
             )
 
             # 9. Generate updated rolling summary
-            new_summary = self.summary_model.summarize(
+            new_summary = await self.summary_model.summarize(
                 conversation=recent_history,
                 previous_summary=previous_summary
             )

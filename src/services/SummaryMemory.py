@@ -10,7 +10,7 @@ class SummaryMemory:
         self.logger = logging.getLogger("uvicorn.error")
 
 
-    def summarize(self, conversation, previous_summary: str | None = None):
+    async def summarize(self, conversation, previous_summary: str | None = None):
 
         summary_memory_prompt = self.template_parser.get(
             group="rag",
@@ -22,7 +22,7 @@ class SummaryMemory:
         )
 
         try:
-            response = self.generation_client.generate_text(
+            response = await self.generation_client.generate_text(
                 prompt=summary_memory_prompt
             )
 

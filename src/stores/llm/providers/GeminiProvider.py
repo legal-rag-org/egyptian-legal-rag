@@ -64,13 +64,13 @@ class GeminiProvider(LLMInterface):
             ].strip()
         )
 
-    def generate_text(
-        self,
-        prompt: str,
-        chat_history: list = None,
-        max_output_tokens: int = None,
-        temperature: float = None,
-    ):
+    async def generate_text(self,
+                              prompt: str,
+                              chat_history: list | None = None,
+                              max_output_tokens: int=None,
+                              temperature: float= None):
+    
+        chat_history = list(chat_history or [])
 
         if not self.client:
             self.logger.error(
@@ -161,7 +161,7 @@ class GeminiProvider(LLMInterface):
 
         return response.text
 
-    def generate_with_tools(
+    async def generate_with_tools(
         self,
         messages: list,
         tools: list,
@@ -227,7 +227,7 @@ class GeminiProvider(LLMInterface):
 
         return response.candidates[0].content
 
-    def embed_text(
+    async def embed_text(
         self,
         text: Union[str, List[str]],
         document_type: str = None,

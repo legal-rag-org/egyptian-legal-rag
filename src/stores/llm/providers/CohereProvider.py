@@ -46,11 +46,13 @@ class CohereProvider(LLMInterface):
        return text.strip() if len(text) <= self.default_input_max_characters else text[:self.default_input_max_characters].strip()
     
 
-    def generate_text(self,
-                          prompt: str,
-                          chat_history: list=[],
-                          max_output_tokens: int=None,
-                          temperature: float= None):
+    async def generate_text(self,
+                              prompt: str,
+                              chat_history: list | None = None,
+                              max_output_tokens: int=None,
+                              temperature: float= None):
+    
+        chat_history = list(chat_history or [])
 
         if not self.client:
                     self.logger.error("CoHere client was not set")
@@ -61,9 +63,8 @@ class CohereProvider(LLMInterface):
             return None
 
 
-        max_output_tokens = max_output_tokens if max_output_tokens else self.default_generation_output_max_tokens
-        temperature = temperature if temperature else self.default_generation_temperature
-
+        max_output_tokens = max_output_tokens if max_output_tokens is not None else self.default_generation_output_max_tokens
+        temperature = temperature if temperature is not None else self.default_generation_temperature
 
         response = self.client.chat(
             model = self.generation_model_id,
@@ -79,7 +80,7 @@ class CohereProvider(LLMInterface):
         
         return response.text
 
-    def generate_with_tools(
+    async def generate_with_tools(
         self,
         messages: list,
         tools: list,

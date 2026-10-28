@@ -56,12 +56,20 @@ async def startup_span():
         model_id=settings.GENERATION_MODEL_ID
     )
 
-    # Metadata filter client
+    # ligthweigth client
     app.ligthweigth_client = llm_provider_factory.create(
-        provider=settings.GENERATION_BACKEND
+        provider=settings.LIGHTWEIGHT_GENERATION_BACKEND
     )
     app.ligthweigth_client.set_generation_model(
         model_id=settings.LIGHTWEIGHT_GENERATION_MODEL
+    )
+
+    # OCR client
+    app.ocr_client = llm_provider_factory.create(
+        provider=settings.OCR_BACKEND
+    )
+    app.ocr_client.set_generation_model(
+        model_id=settings.OCR_MODEL_ID
     )
 
     # Embedding client
@@ -85,7 +93,7 @@ async def startup_span():
         default_language=settings.DEFAULT_LANG
     )
 
-    # reranker config
+    # reranker client
     reranker_provider_factory = RerankerProviderFactory(
         config=settings
     )
@@ -93,7 +101,7 @@ async def startup_span():
         provider=settings.RERANKER_BACKEND
     )
 
-    # table extractor config
+    # vision client
     app.vision_factory = VisionFactory(
         config=settings,
         template_parser=app.template_parser,

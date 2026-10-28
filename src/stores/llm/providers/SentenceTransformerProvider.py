@@ -38,13 +38,18 @@ class SentenceTransformerProvider(LLMInterface):
                 return text[:self.default_input_max_character].strip()
 
     
-    def generate_text(self, prompt: str, chat_history: list = [], max_output_tokens: int = None,
-                       temperature: float = None):
+    async def generate_text(self,
+                              prompt: str,
+                              chat_history: list | None = None,
+                              max_output_tokens: int=None,
+                              temperature: float= None):
+    
+        chat_history = list(chat_history or [])
         
         raise NotImplementedError
     
 
-    def embed_text(self, text: Union[str, List[str]], document_type: str = None):
+    async def embed_text(self, text: Union[str, List[str]], document_type: str = None):
         if self.embedding_client is None or self.embedding_model_id is None:
             self.logger.error(
                 "Embedding model for SentenceTransformerProvider was not set"
@@ -71,7 +76,7 @@ class SentenceTransformerProvider(LLMInterface):
     def construct_prompt(self, prompt: str, role: str):
         return {"role": role, "content": prompt}
 
-    def generate_with_tools(
+    async def generate_with_tools(
             self,
             messages: list,
             tools: list,

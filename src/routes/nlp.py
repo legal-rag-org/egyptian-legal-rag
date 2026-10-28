@@ -351,8 +351,6 @@ async def chat(
         db_client=request.app.db_client
     )
 
-    is_new_conversation = chat_request.conversation_uuid is None
-
     conversation = await conversation_model.get_or_create_conversation(
         project_id=project.project_id,
         user_id=current_user.user_id,

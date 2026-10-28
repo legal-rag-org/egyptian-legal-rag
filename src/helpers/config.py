@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     GENERATION_BACKEND_LITERAL: List[str]=None
     GENERATION_BACKEND: str
+    LIGHTWEIGHT_GENERATION_BACKEND: str
     LIGHTWEIGHT_GENERATION_MODEL: str
     EMBEDDING_BACKEND_LITERAL: List[str]=None
     EMBEDDING_BACKEND: str
@@ -58,6 +59,10 @@ class Settings(BaseSettings):
 
     VISION_MODEL_ID: str
     VISION_BACKEND: str
+
+
+    OCR_BACKEND: str
+    OCR_MODEL_ID: str
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
