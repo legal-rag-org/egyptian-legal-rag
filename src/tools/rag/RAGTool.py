@@ -50,13 +50,12 @@ class RAGTool(ToolInterface):
         limit: int = 10,
         retrieval_limit: int = 20,
         chat_history: list | None = None,
-        hyde_passages: list[str] = None,
+        hyde_passages: list[str] | None = None,
+        search_queries: list[str] | None = None,
+        metadata_filters: dict | None = None,
     ):
-
         if self._rag_handler is None:
-            return {
-                "error": "RAG handler is not configured."
-            }
+            return {"error": "RAG handler is not configured."}
 
         return await self._rag_handler(
             project=project,
@@ -65,9 +64,16 @@ class RAGTool(ToolInterface):
             retrieval_limit=retrieval_limit,
             chat_history=chat_history,
             hyde_passages=hyde_passages,
+            search_queries=search_queries,
+            metadata_filters=metadata_filters,
         )
 
-    async def execute_with_context(self, arguments: dict, context: AgentContext) -> dict:
+    async def execute_with_context(
+        self,
+        arguments: dict,
+        context: AgentContext
+    ) -> dict:
+
         result = await self.execute(
             project=context.project,
             query=arguments.get("query"),
@@ -75,6 +81,8 @@ class RAGTool(ToolInterface):
             retrieval_limit=context.retrieval_limit,
             chat_history=context.chat_history,
             hyde_passages=context.hyde_passages,
+            search_queries=context.search_queries,
+            metadata_filters=context.metadata_filters,
         )
 
         if not result:
@@ -85,7 +93,9 @@ class RAGTool(ToolInterface):
         return {
             "answer": answer,
             "full_prompt": full_prompt,
-            "retrieved_documents": self._serialize_retrieved_documents(retrieved_documents),
+            "retrieved_documents": self._serialize_retrieved_documents(
+                retrieved_documents
+            ),
             "filters": filters,
             "citations": citations,
         }

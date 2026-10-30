@@ -10,6 +10,7 @@ from services.MetadataFilterExtractor import MetadataFilterExtractor
 from services.SummaryMemory import SummaryMemory
 from .enums.nlp import NLPControllerEnums
 from services.PromptInjuction import PromptInjectionDetector
+from services.AdaptiveRAGRouter import AdaptiveRAGRouter
 
 from services.AgentService import AgentContext, AgentService
 from tools.ToolRegistry import ToolRegistry
@@ -60,6 +61,11 @@ class NLPController(BaseController):
         self.metadata_filter_extractor = MetadataFilterExtractor(
             generation_client=self.lightweight_client,
             template_parser=self.template_parser,
+        )
+
+        self.adaptive_rag_router = AdaptiveRAGRouter(
+            generation_client=self.lightweight_client,
+            template_parser=self.template_parser
         )
 
         tool_registry = ToolRegistry()
@@ -231,7 +237,8 @@ class NLPController(BaseController):
         self,
         project: Project,
         text: str,
-        limit: int = 20
+        limit: int = 20,
+        filters: dict | None = None
     ):
         collection_name = self.create_collection_name(
             project_id=project.project_id
@@ -247,15 +254,7 @@ class NLPController(BaseController):
             return [], {}
         
         #step3: extract metadata filters from user query
-        filters = await self.metadata_filter_extractor.extract(
-            query=text,
-            available_fields=NLPControllerEnums.FILTERABLE_METADATA.value,
-        )
-
-        filters = self.validate_metadata_filters(
-            filters=filters,
-            allowed_values=NLPControllerEnums.ALLOWED_METADATA_VALUES.value,
-        )
+        filters = filters or {}
 
 
         vector_results = await self.vectordb_client.search_by_vector(
@@ -349,6 +348,43 @@ class NLPController(BaseController):
                 for document_id, _ in ranked_documents[:limit]
             ]
 
+    def global_rrf(
+        self,
+        ranked_lists: list[list],
+        k: int = 60,
+        limit: int = 20,
+    ) -> list:
+
+        scores = {}
+        documents = {}
+
+        for ranked_list in ranked_lists:
+
+            for rank, document in enumerate(ranked_list, start=1):
+
+                # Use document text as a unique identifier
+                doc_id = document.text
+
+                # Keep one copy of each document
+                documents[doc_id] = document
+
+                # Accumulate RRF score across queries
+                scores[doc_id] = scores.get(doc_id, 0.0) + (
+                    1.0 / (k + rank)
+                )
+
+        # Sort documents by their global RRF scores
+        ranked_documents = sorted(
+            documents.keys(),
+            key=lambda doc_id: scores[doc_id],
+            reverse=True,
+        )
+
+        return [
+            documents[doc_id]
+            for doc_id in ranked_documents[:limit]
+        ]
+
     def build_document_citation(self, document: RetrievedDocument) -> dict:
         if not document.file_url:
             return {
@@ -379,54 +415,62 @@ class NLPController(BaseController):
         }
 
 
+    
     async def answer_rag_questions(
-        self, project: Project,
+        self,
+        project: Project,
         query: str,
-        limit: int=10,
+        limit: int = 10,
         retrieval_limit: int = 20,
         chat_history: list | None = None,
+        search_queries: list[str] | None = None,
+        metadata_filters: dict | None = None,
         hyde_passages: list[str] | None = None,
     ):
-
-
         if chat_history is None:
             chat_history = []
 
         answer, full_prompt = None, None
 
-        # Combine the tool query with the generated alternative queries.
-        search_queries = list(
+        # 1. Prepare all queries for retrieval
+        queries_to_search = list(
             dict.fromkeys(
                 q.strip()
-                for q in [query, *(hyde_passages or [])]
+                for q in [
+                    *(search_queries or [query]),
+                    *(hyde_passages or [])
+                ]
                 if isinstance(q, str) and q.strip()
             )
         )
 
-        # Search using all queries concurrently.
+        filters = metadata_filters or {}
+
+        self.logger.info("Search queries: %s", queries_to_search)
+        self.logger.info("Metadata filters: %s", filters)
+
+        # 2. Execute all hybrid searches concurrently
         search_results = await asyncio.gather(
             *[
                 self.search_hybrid(
                     project=project,
                     text=search_query,
                     limit=retrieval_limit,
+                    filters=filters,
                 )
-                for search_query in search_queries
+                for search_query in queries_to_search
             ],
             return_exceptions=True,
         )
-        self.logger.info("Search queries: %s", search_queries)
 
-        # Merge results and remove duplicate chunks.
-        retrieved_documents = []
-        seen_documents = set()
-        filters = {}
+        # 3. Collect ranked lists from all queries
+        ranked_lists = []
 
         for result in search_results:
-            if isinstance(result, Exception):
 
+            if isinstance(result, Exception):
                 self.logger.error(
-                    "Hybrid search failed for one of the expanded queries: %s",
+                    "Hybrid search failed for one of the queries: %s",
                     result,
                     exc_info=(
                         type(result),
@@ -436,26 +480,24 @@ class NLPController(BaseController):
                 )
                 continue
 
+            documents, _ = result
 
-            documents, query_filters = result
+            if documents:
+                ranked_lists.append(documents)
 
-            if not filters:
-                filters = query_filters or {}
 
-            for document in documents or []:
-                document_key = document.text
-
-                if document_key in seen_documents:
-                    continue
-
-                seen_documents.add(document_key)
-                retrieved_documents.append(document)
+        # 4. Apply Global RRF across all query results
+        retrieved_documents = self.global_rrf(
+            ranked_lists=ranked_lists,
+            k=60,
+            limit=retrieval_limit,
+        )
 
         if not retrieved_documents:
             answer = NLPControllerEnums.NO_AVAILABLE_DOCUMENT_ANSWER.value
             return answer, full_prompt, chat_history, [], filters, []
 
-        # Rerank the merged results only once.
+        # 4. Rerank the merged results only once
         reranked_documents = self.reranker_client.rerank(
             query=query,
             documents=retrieved_documents,
@@ -466,65 +508,71 @@ class NLPController(BaseController):
 
         retrieved_documents = reranked_documents[:limit]
 
-
-        # 4) Build citations
+        # 5. Build citations
         citations = [
             self.build_document_citation(doc)
             for doc in retrieved_documents
         ]
 
-        # 4) construct the llm prompt
+        # 6. Construct the LLM prompt
         system_prompt = self.template_parser.get(
             group="rag",
             key="system_prompt",
         )
 
-        documents_prompts = "\n".join([self.template_parser.get(
-            group="rag",
-            key="document_prompt",
-            vars={
-                "doc_num":idx + 1,
-                "chunk_text": doc.text,
-                "chunk_metadata": "\n".join([
-                    f"المصدر: {doc.source}",
-                    f"الصفحة: {doc.page}",
-                    f"اللينك : {doc.file_url}"
-                ]),
-            }
-        )  for idx, doc in  enumerate(retrieved_documents)])
+        documents_prompts = "\n".join([
+            self.template_parser.get(
+                group="rag",
+                key="document_prompt",
+                vars={
+                    "doc_num": idx + 1,
+                    "chunk_text": doc.text,
+                    "chunk_metadata": "\n".join([
+                        f"المصدر: {doc.source}",
+                        f"الصفحة: {doc.page}",
+                        f"اللينك : {doc.file_url}"
+                    ]),
+                }
+            )
+            for idx, doc in enumerate(retrieved_documents)
+        ])
 
         footer_prompt = self.template_parser.get(
             group="rag",
             key="footer_prompt",
             vars={
-                "query" : query
+                "query": query
             }
         )
 
         system_message = self.generation_client.construct_prompt(
-                prompt=system_prompt,
-                role=self.generation_client.enums.SYSTEM.value
+            prompt=system_prompt,
+            role=self.generation_client.enums.SYSTEM.value
         )
 
         chat_history = [system_message] + chat_history
-
 
         full_prompt = "\n\n".join([
             documents_prompts,
             footer_prompt
         ])
 
-
         answer = await self.generation_client.generate_text(
             prompt=full_prompt,
             chat_history=chat_history,
-
         )
 
+        self.logger.info("Generated answer: %r", answer)
 
-        self.logger.info(f"Generated answer: {answer!r}")
+        return (
+            answer,
+            full_prompt,
+            chat_history,
+            retrieved_documents,
+            filters,
+            citations
+        )
 
-        return answer, full_prompt, chat_history, retrieved_documents, filters, citations
 
 
     def build_chat_history(self, messages: list):
@@ -711,7 +759,7 @@ class NLPController(BaseController):
             self.logger.warning(
                 "HyDE generation failed or returned invalid output."
             )
-            return expanded_queries
+            return []
 
 
 
@@ -763,24 +811,120 @@ class NLPController(BaseController):
             messages=messages
         )
 
-        rewritten_query = await self._rewrite_query(
-            rewrite_query=rewrite_query,
-            rewrite_history=rewrite_history,
-            previous_summary=previous_summary
+        conversation_context = "\n".join([
+            rewrite_history,
+            f"Previous summary: {previous_summary}"
+        ]).strip()
+
+        # 1. Adaptive Routing
+        routing_plan = await self.adaptive_rag_router.route(
+            query=rewrite_query,
+            conversation_context=conversation_context
         )
 
-        self.logger.info(f"rewritten query {rewritten_query}")
-
-        expanded_queries = await self._expand_query(rewritten_query=rewritten_query)
-
-        self.logger.info(f"expanded_queries : {expanded_queries}")
-
-        hyde_passages = await self._hyde_queries(
-            expanded_queries=expanded_queries
+        self.logger.info(
+            "Adaptive RAG routing plan: %s",
+            routing_plan
         )
 
-        self.logger.info("HyDE passages: %s", hyde_passages)
+        # 2. Query Rewriting
+        rewritten_query = rewrite_query
 
+        if routing_plan["query_rewriting"]["enabled"]:
+            try:
+                result = await self._rewrite_query(
+                    rewrite_query=rewrite_query,
+                    rewrite_history=rewrite_history,
+                    previous_summary=previous_summary
+                )
+
+                if isinstance(result, str) and result.strip():
+                    rewritten_query = result.strip()
+
+                self.logger.info("Rewritten query: %s", rewritten_query)
+
+            except Exception:
+                self.logger.exception(
+                    "Query rewriting failed. Using the original query."
+                )
+
+
+        # 3. Multi-Query
+        search_queries = [rewritten_query]
+
+        if routing_plan["multi_query"]["enabled"]:
+            try:
+                expanded_queries = await self._expand_query(
+                    rewritten_query=rewritten_query
+                )
+
+                if isinstance(expanded_queries, list):
+                    search_queries = list(
+                        dict.fromkeys(
+                            q.strip()
+                            for q in [rewritten_query, *expanded_queries]
+                            if isinstance(q, str) and q.strip()
+                        )
+                    )
+
+                self.logger.info("Search queries: %s", search_queries)
+
+            except Exception:
+                self.logger.exception(
+                    "Multi-query generation failed. Using the main query only."
+                )
+
+
+        # 4. HyDE
+        hyde_passages = []
+
+        if routing_plan["hyde"]["enabled"]:
+            try:
+                generated_passages = await self._hyde_queries(
+                    expanded_queries=search_queries
+                )
+
+                if isinstance(generated_passages, list):
+                    hyde_passages = list(
+                        dict.fromkeys(
+                            passage.strip()
+                            for passage in generated_passages
+                            if isinstance(passage, str) and passage.strip()
+                        )
+                    )
+
+                self.logger.info("HyDE passages: %s", hyde_passages)
+
+            except Exception:
+                self.logger.exception(
+                    "HyDE generation failed. Continuing without HyDE."
+                )
+
+
+        # 5. Metadata Filtering
+        metadata_filters = {}
+
+        if routing_plan["metadata_filtering"]["enabled"]:
+            try:
+                extracted_filters = await self.metadata_filter_extractor.extract(
+                    query=rewrite_query,
+                    available_fields=NLPControllerEnums.FILTERABLE_METADATA.value,
+                )
+
+                metadata_filters = self.validate_metadata_filters(
+                    filters=extracted_filters,
+                    allowed_values=NLPControllerEnums.ALLOWED_METADATA_VALUES.value,
+                )
+
+                self.logger.info(
+                    "Extracted metadata filters: %s",
+                    metadata_filters
+                )
+
+            except Exception:
+                self.logger.exception(
+                    "Metadata filtering failed. Continuing without filters."
+                )
         context = AgentContext(
             project=project,
             chat_history=chat_history,
@@ -788,11 +932,12 @@ class NLPController(BaseController):
             retrieval_limit=retrieval_limit,
             latitude=latitude,
             longitude=longitude,
+            routing_plan=routing_plan,
+            search_queries=search_queries,
+            metadata_filters=metadata_filters,
             hyde_passages=hyde_passages
         )
 
-
-        # 4. Run RAG
         agent_result = await self.agent_service.run(
             query=rewritten_query,
             context=context

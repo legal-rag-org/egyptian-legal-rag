@@ -8,11 +8,19 @@ from typing import Any
 @dataclass
 class AgentContext:
     project: Any
+
     chat_history: list = field(default_factory=list)
+
     limit: int = 10
     retrieval_limit: int = 20
+
     latitude: float | None = None
     longitude: float | None = None
+
+    # Adaptive RAG
+    routing_plan: dict = field(default_factory=dict)
+    search_queries: list[str] = field(default_factory=list)
+    metadata_filters: dict = field(default_factory=dict)
     hyde_passages: list[str] = field(default_factory=list)
 
 
