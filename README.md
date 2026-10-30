@@ -41,14 +41,29 @@ flowchart TD
     A[User Query] --> B[Query Processing]
     B --> C[Prompt Injection Detection]
     C --> D[Conversation Context]
-    D --> E[Query Rewriting]
-    E --> F[Hybrid Search]
-    F --> G[Document Reranking]
-    G --> H[Top-K Selection]
-    H --> I[Citation Building]
-    I --> J[Prompt Construction]
-    J --> K[Answer Generation]
-    K --> L[Answer and Sources]
+    D --> E[Adaptive Query Router]
+
+    E --> F[Query Rewriting]
+    E --> G[Multi-Query Generation]
+    E --> H[HyDE Generation]
+    E --> I[Metadata Filter Extraction]
+
+    F --> J[Prepare Retrieval Queries]
+    G --> J
+    H --> J
+
+    I --> K[Shared Metadata Filters]
+    J --> L[Parallel Hybrid Search]
+    K --> L
+
+    L --> M[Local RRF]
+    M --> N[Global RRF]
+    N --> O[Document Reranking]
+    O --> P[Top-K Selection]
+    P --> Q[Citation Building]
+    Q --> R[Prompt Construction]
+    R --> S[Answer Generation]
+    S --> T[Answer and Sources]
 ```
 
 ### Pipeline Stages
@@ -57,37 +72,41 @@ flowchart TD
 
 2. **Prompt Injection Detection:** Checks the processed query for potential prompt injection attempts before continuing.
 
-3. **Conversation Context:** Loads previous messages and the existing conversation summary to understand follow-up questions.
+3. **Conversation Context:** Loads previous messages and the existing conversation summary to understand follow-up questions and preserve conversational context.
 
-4. **Query Rewriting:** Reformulates unclear or context-dependent questions using the conversation history and previous summary to improve retrieval quality.
+4. **Adaptive Query Routing:** Analyzes the user's query and determines which retrieval techniques are useful for the current request. Instead of applying every technique to every query, the router selectively enables or skips them.
 
-   **Example:**
+   Available techniques include:
+   - **Query Rewriting:** Reformulates unclear or context-dependent questions using conversation history and previous summaries.
+   - **Multi-Query Generation:** Generates alternative search queries to retrieve relevant information from different perspectives.
+   - **HyDE (Hypothetical Document Embeddings):** Generates hypothetical passages that can help retrieve relevant legal documents.
+   - **Metadata Filtering:** Extracts structured metadata constraints, such as legal domains or law identifiers, to narrow the retrieval scope.
 
-   Original query:
+5. **Retrieval Query Preparation:** Combines the available rewritten query, generated search queries, and hypothetical passages into a deduplicated collection of retrieval queries.
 
-   > أنا كنت شغال وبعدين حصل موضوع في الشغل ومش عارف آخد حقي إزاي، أعمل إيه؟
+6. **Metadata Filter Extraction:** Extracts metadata filters once per user query when enabled by the router. The resulting filters are shared across all retrieval queries rather than being extracted independently for each search.
 
-   If the conversation indicates that the employer terminated the contract without paying the employee's outstanding wages, the rewritten query could be:
+7. **Parallel Hybrid Search:** Executes hybrid retrieval for the prepared queries concurrently. Each search combines:
+   - **Dense Retrieval:** Finds semantically similar legal passages using vector embeddings.
+   - **Keyword Retrieval:** Finds passages based on keyword matching.
+   - **Local RRF:** Fuses the dense and keyword search rankings within each individual query.
 
-   > ما حقوق العامل في مصر عند انتهاء علاقة العمل وعدم حصوله على الأجور المستحقة، وما الإجراءات القانونية للمطالبة بها؟
+8. **Global RRF:** Combines the ranked results from different retrieval queries into a unified ranking. This allows passages retrieved by multiple queries to accumulate relevance scores across the different result lists.
 
-   The rewritten query uses the available context to make the search more specific without assuming details that the user has not provided.
+9. **Document Reranking:** Reorders the globally fused candidate passages according to their relevance to the original user query.
 
-5. **Hybrid Search:** Retrieves candidate legal passages using the configured hybrid retrieval strategy.
+10. **Top-K Selection:** Selects the highest-ranked documents to provide focused legal context for answer generation.
 
-6. **Document Reranking:** Reorders the retrieved passages according to their relevance to the rewritten query.
+11. **Citation Building:** Extracts available source information, page numbers, and document links from the selected passages.
 
-7. **Top-K Selection:** Selects the highest-ranked documents to provide focused legal context for answer generation.
+12. **Prompt Construction:** Combines the retrieved legal passages, their metadata, and the user's question into the generation prompt.
 
-8. **Citation Building:** Extracts available source information, page numbers, and document links from the selected passages.
+13. **Answer Generation:** Generates a response using the selected legal context and available conversation history.
 
-9. **Prompt Construction:** Combines the retrieved legal passages, their metadata, and the user's question into the generation prompt.
-
-10. **Answer Generation:** Generates a response using the selected legal context and available conversation history.
-
-11. **Answer and Sources:** Returns the generated answer, retrieved documents, applied filters, and available citations.
+14. **Answer and Sources:** Returns the generated answer, retrieved documents, applied metadata filters, and available citations.
 
 If no relevant documents are retrieved, the system returns a predefined no-answer response instead of proceeding with answer generation.
+
 
 ### Why This Approach?
 
