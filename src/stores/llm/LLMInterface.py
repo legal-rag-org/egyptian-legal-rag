@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from pydantic import BaseModel
+from typing import Type
 
 class LLMInterface(ABC):
 
@@ -17,7 +19,19 @@ class LLMInterface(ABC):
                               chat_history: list | None = None,
                               max_output_tokens: int=None,
                               temperature: float= None):
-    
+
+        pass
+
+    @abstractmethod
+    async def generate_structured(
+            self,
+            prompt: str,
+            output_schema: Type[BaseModel],
+            chat_history: list | None = None,
+            max_output_tokens: int = None,
+            temperature: float = None,
+        ):
+
         pass
 
     @abstractmethod
@@ -43,6 +57,6 @@ class LLMInterface(ABC):
         pass
 
 
-    
+
 
 

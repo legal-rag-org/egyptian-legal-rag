@@ -1,8 +1,8 @@
 import logging
 from sentence_transformers import SentenceTransformer
 from ..LLMInterface import LLMInterface
-from ..LLMEnums import DocumentTypeEnum
-from typing import List, Union
+from typing import List, Union, Type
+from pydantic import BaseModel
 
 class SentenceTransformerProvider(LLMInterface):
 
@@ -47,6 +47,17 @@ class SentenceTransformerProvider(LLMInterface):
         chat_history = list(chat_history or [])
         
         raise NotImplementedError
+
+    async def generate_structured(
+                self,
+                prompt: str,
+                output_schema: Type[BaseModel],
+                chat_history: list | None = None,
+                max_output_tokens: int = None,
+                temperature: float = None,
+            ):
+    
+            raise NotImplementedError
     
 
     async def embed_text(self, text: Union[str, List[str]], document_type: str = None):

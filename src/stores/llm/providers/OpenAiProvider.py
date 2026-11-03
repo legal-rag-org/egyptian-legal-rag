@@ -2,7 +2,8 @@ from ..LLMInterface import LLMInterface
 from ..LLMEnums import OpenAIEnums
 from openai import AsyncOpenAI
 import logging
-from typing import List, Union
+from typing import List, Union, Type
+from pydantic import BaseModel
 
 class OpenAiProvider(LLMInterface):
 
@@ -90,6 +91,97 @@ class OpenAiProvider(LLMInterface):
             return None
 
         return response.choices[0].message.content
+
+
+    
+    async def generate_structured(
+        self,
+        prompt: str,
+        output_schema: Type[BaseModel],
+        chat_history: list | None = None,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+
+        chat_history = list(chat_history or [])
+
+        if not self.client:
+            self.logger.error("OpenAI client was not set")
+            return None
+
+        if not self.generation_model_id:
+            self.logger.error("Generation Model for OpenAI was not set")
+            return None
+
+        max_output_tokens = (
+            max_output_tokens
+            if max_output_tokens is not None
+            else self.default_generation_output_max_tokens
+        )
+
+        temperature = (
+            temperature
+            if temperature is not None
+            else self.default_generation_temperature
+        )
+
+        chat_history.append(
+            self.construct_prompt(
+                prompt=prompt,
+                role=OpenAIEnums.USER.value
+            )
+        )
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.generation_model_id,
+                messages=chat_history,
+                max_tokens=max_output_tokens,
+                temperature=temperature,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": output_schema.__name__,
+                        "strict": True,
+                        "schema": output_schema.model_json_schema()
+                    }
+                }
+            )
+
+            if (
+                not response
+                or not response.choices
+                or not response.choices[0].message
+            ):
+                self.logger.error(
+                    "Error while generating structured output"
+                )
+                return None
+
+            message = response.choices[0].message
+
+            if message.refusal:
+                self.logger.warning(
+                    f"Structured generation refused: {message.refusal}"
+                )
+                return None
+
+            raw_output = message.content
+
+            if not raw_output:
+                self.logger.warning(
+                    "Structured generation returned empty output"
+                )
+                return None
+
+            return output_schema.model_validate_json(raw_output)
+
+        except Exception:
+            self.logger.exception(
+                "Error while generating structured output"
+            )
+            return None
+
 
     async def generate_with_image(
         self,

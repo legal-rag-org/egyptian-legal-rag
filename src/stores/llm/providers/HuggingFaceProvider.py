@@ -2,7 +2,8 @@ from ..LLMInterface import LLMInterface
 from stores.llm.LLMEnums import HuggingfaceEnum
 from huggingface_hub import InferenceClient
 import logging
-from typing import List, Union
+from typing import List, Union, Type
+from pydantic import BaseModel
 
 class HuggingFaceProvider(LLMInterface):
      def __init__(self, api_key: str, default_input_max_character: int=1024,
@@ -83,6 +84,18 @@ class HuggingFaceProvider(LLMInterface):
                    return None
 
             return response.choices[0].message.content
+
+
+     async def generate_structured(
+              self,
+              prompt: str,
+              output_schema: Type[BaseModel],
+              chat_history: list | None = None,
+              max_output_tokens: int = None,
+              temperature: float = None,
+       ):
+     
+             pass
 
      async def generate_with_tools(
        self,
