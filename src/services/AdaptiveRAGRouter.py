@@ -1,12 +1,31 @@
 
-import json
 import logging
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class FeatureRouting(BaseModel):
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = Field(default=None)
+    reason: str | None = Field(default=None)
+
+
+class AdaptiveRAGRoutingPlan(BaseModel):
+
+    model_config = ConfigDict(extra="forbid")
+
+    query_rewriting: FeatureRouting | None = None
+    multi_query: FeatureRouting | None = None
+    hyde: FeatureRouting | None = None
+    metadata_filtering: FeatureRouting | None = None
 
 
 class AdaptiveRAGRouter:
 
-    def __init__(self, generation_client, template_parser):
-        self.generation_client = generation_client
+    def __init__(self, generation_model, template_parser):
+        self.generation_model = generation_model
         self.template_parser = template_parser
         self.logger = logging.getLogger(__name__)
 
@@ -93,12 +112,18 @@ class AdaptiveRAGRouter:
                 }
             )
 
-            response = await self.generation_client.generate_text(
+            response = await self.generation_model.generate_structured(
                 prompt=prompt,
-                chat_history=[]
+                output_schema=AdaptiveRAGRoutingPlan
             )
 
-            routing_plan = json.loads(response)
+            if response is None:
+                self.logger.warning(
+                    "Adaptive RAG Router returned None falling back to static rag pipeline"
+                )
+                return self._get_default_routing_plan()
+
+            routing_plan = response.model_dump(exclude_none=True)
 
             return self._validate_routing_plan(routing_plan)
 

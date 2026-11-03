@@ -11,6 +11,9 @@ from services.SummaryMemory import SummaryMemory
 from .enums.nlp import NLPControllerEnums
 from services.PromptInjuction import PromptInjectionDetector
 from services.AdaptiveRAGRouter import AdaptiveRAGRouter
+from services.QueryRewriting import QueryRewriting
+from services.QueryExpansion import QueryExpansion
+from services.HyDE import HyDE
 
 from services.AgentService import AgentContext, AgentService
 from tools.ToolRegistry import ToolRegistry
@@ -64,7 +67,22 @@ class NLPController(BaseController):
         )
 
         self.adaptive_rag_router = AdaptiveRAGRouter(
-            generation_client=self.lightweight_client,
+            generation_model=self.lightweight_client,
+            template_parser=self.template_parser
+        )
+
+        self.query_rewriting = QueryRewriting(
+            generation_model=self.lightweight_client,
+            template_parser=self.template_parser
+        )
+
+        self.query_expansion = QueryExpansion(
+            generation_model=self.lightweight_client,
+            template_parser=self.template_parser
+        )
+
+        self.hyde = HyDE(
+            generation_model=self.lightweight_client,
             template_parser=self.template_parser
         )
 
@@ -657,113 +675,6 @@ class NLPController(BaseController):
             {vision_context}
             """.strip()
 
-
-    async def _rewrite_query(self, rewrite_query: str, rewrite_history: str | None = "", previous_summary: str | None = "") -> str:
-        query_rewriter_prompt = self.template_parser.get(
-            group="rag",
-            key="query_rewriter_prompt",
-            vars={
-                "chat_history": rewrite_history,
-                "previous_summary": previous_summary,
-                "query": rewrite_query,
-            }
-        )
-
-        rewritten_query = await self.lightweight_client.generate_text(
-            prompt=query_rewriter_prompt,
-            chat_history=[]
-        )
-
-        return (rewritten_query or rewrite_query).strip()
-
-
-
-
-    async def _expand_query(self, rewritten_query: str) -> list[str]:
-        query_expansion_prompt = self.template_parser.get(
-            group="rag",
-            key="query_expansion_prompt",
-            vars={"query": rewritten_query},
-        )
-
-        response = await self.lightweight_client.generate_text(
-            prompt=query_expansion_prompt,
-            chat_history=[],
-        )
-
-        self.logger.info(f"expanded queries : {response}")
-
-        try:
-            queries = json.loads(response or "[]")
-
-            if (
-                not isinstance(queries, list)
-                or len(queries) != 3
-                or not all(
-                    isinstance(q, str) and q.strip()
-                    for q in queries
-                )
-            ):
-                raise ValueError("Invalid query expansion output")
-
-            # Remove duplicates while preserving order.
-            queries = list(dict.fromkeys(q.strip() for q in queries))
-
-            return queries
-
-        except (json.JSONDecodeError, ValueError, TypeError):
-            self.logger.warning(
-                "Query expansion failed; falling back to rewritten query."
-            )
-            return [rewritten_query]
-
-
-    async def _hyde_queries(
-        self,
-        expanded_queries: list[str],
-    ) -> list[str]:
-        """Generate one hypothetical passage per expanded query in a single LLM call."""
-
-        hyde_prompt = self.template_parser.get(
-            group="rag",
-            key="hyde_prompt",
-            vars={
-                "queries": json.dumps(
-                    expanded_queries,
-                    ensure_ascii=False,
-                )
-            },
-        )
-
-        response = await self.lightweight_client.generate_text(
-            prompt=hyde_prompt,
-            chat_history=[],
-        )
-
-        try:
-            hyde_passages = json.loads(response or "[]")
-
-            if (
-                not isinstance(hyde_passages, list)
-                or len(hyde_passages) != len(expanded_queries)
-                or not all(
-                    isinstance(passage, str) and passage.strip()
-                    for passage in hyde_passages
-                )
-            ):
-                raise ValueError("Invalid HyDE output")
-
-            return [passage.strip() for passage in hyde_passages]
-
-        except (json.JSONDecodeError, ValueError, TypeError):
-            self.logger.warning(
-                "HyDE generation failed or returned invalid output."
-            )
-            return []
-
-
-
-
     async def _detect_injection(self, query: str) -> dict:
         return await self.prompt_injection_detector.detect(query=query)
 
@@ -831,74 +742,37 @@ class NLPController(BaseController):
         rewritten_query = rewrite_query
 
         if routing_plan["query_rewriting"]["enabled"]:
-            try:
-                result = await self._rewrite_query(
-                    rewrite_query=rewrite_query,
-                    rewrite_history=rewrite_history,
-                    previous_summary=previous_summary
-                )
+            rewritten_query = await self.query_rewriting.rewrite(
+                rewrite_query=rewrite_query,
+                rewrite_history=rewrite_history,
+                previous_summary=previous_summary
+            )
 
-                if isinstance(result, str) and result.strip():
-                    rewritten_query = result.strip()
-
-                self.logger.info("Rewritten query: %s", rewritten_query)
-
-            except Exception:
-                self.logger.exception(
-                    "Query rewriting failed. Using the original query."
-                )
+            self.logger.info(f"rewritten query generated {rewritten_query}")
 
 
         # 3. Multi-Query
         search_queries = [rewritten_query]
 
         if routing_plan["multi_query"]["enabled"]:
-            try:
-                expanded_queries = await self._expand_query(
-                    rewritten_query=rewritten_query
-                )
+            search_queries = await self.query_expansion.expand(
+                rewritten_query=rewritten_query
+            )
 
-                if isinstance(expanded_queries, list):
-                    search_queries = list(
-                        dict.fromkeys(
-                            q.strip()
-                            for q in [rewritten_query, *expanded_queries]
-                            if isinstance(q, str) and q.strip()
-                        )
-                    )
-
-                self.logger.info("Search queries: %s", search_queries)
-
-            except Exception:
-                self.logger.exception(
-                    "Multi-query generation failed. Using the main query only."
-                )
+            self.logger.info("Search queries: %s", search_queries)
 
 
         # 4. HyDE
         hyde_passages = []
 
         if routing_plan["hyde"]["enabled"]:
-            try:
-                generated_passages = await self._hyde_queries(
-                    expanded_queries=search_queries
-                )
 
-                if isinstance(generated_passages, list):
-                    hyde_passages = list(
-                        dict.fromkeys(
-                            passage.strip()
-                            for passage in generated_passages
-                            if isinstance(passage, str) and passage.strip()
-                        )
-                    )
+            hyde_passages = await self.hyde.hyde_passages(
+                search_queries=search_queries
+            )
 
-                self.logger.info("HyDE passages: %s", hyde_passages)
+            self.logger.info("HyDE passages: %s", hyde_passages)
 
-            except Exception:
-                self.logger.exception(
-                    "HyDE generation failed. Continuing without HyDE."
-                )
 
 
         # 5. Metadata Filtering
@@ -925,6 +799,7 @@ class NLPController(BaseController):
                 self.logger.exception(
                     "Metadata filtering failed. Continuing without filters."
                 )
+
         context = AgentContext(
             project=project,
             chat_history=chat_history,
@@ -939,7 +814,7 @@ class NLPController(BaseController):
         )
 
         agent_result = await self.agent_service.run(
-            query=rewritten_query,
+            query=rewrite_query,
             context=context
         )
         answer = agent_result["answer"]

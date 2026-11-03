@@ -4,7 +4,8 @@ from ..LLMEnums import GeminiEnums
 from google import genai
 
 import logging
-from typing import List, Union
+from typing import List, Union, Type
+from pydantic import BaseModel
 
 
 class GeminiProvider(LLMInterface):
@@ -160,6 +161,17 @@ class GeminiProvider(LLMInterface):
             return None
 
         return response.text
+
+    async def generate_structured(
+                self,
+                prompt: str,
+                output_schema: Type[BaseModel],
+                chat_history: list | None = None,
+                max_output_tokens: int = None,
+                temperature: float = None,
+            ):
+    
+            pass
 
     async def generate_with_tools(
         self,

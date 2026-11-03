@@ -2,7 +2,8 @@ from ..LLMInterface import LLMInterface
 from ..LLMEnums import CohereEnums, DocumentTypeEnum
 import cohere
 import logging
-from typing import List, Union
+from typing import List, Union, Type
+from pydantic import BaseModel
 
 class CohereProvider(LLMInterface):
 
@@ -79,6 +80,17 @@ class CohereProvider(LLMInterface):
             return None
         
         return response.text
+
+    async def generate_structured(
+                self,
+                prompt: str,
+                output_schema: Type[BaseModel],
+                chat_history: list | None = None,
+                max_output_tokens: int = None,
+                temperature: float = None,
+            ):
+    
+            pass
 
     async def generate_with_tools(
         self,

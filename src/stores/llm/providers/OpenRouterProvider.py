@@ -4,7 +4,8 @@ from ..LLMEnums import OpenRouterEnum
 from openai import AsyncOpenAI
 
 import logging
-from typing import List, Union
+from typing import List, Union, Type
+from pydantic import BaseModel
 
 
 class OpenRouterProvider(LLMInterface):
@@ -112,6 +113,17 @@ class OpenRouterProvider(LLMInterface):
             return None
 
         return response.choices[0].message.content
+
+    async def generate_structured(
+                self,
+                prompt: str,
+                output_schema: Type[BaseModel],
+                chat_history: list | None = None,
+                max_output_tokens: int = None,
+                temperature: float = None,
+            ):
+    
+            pass
 
     async def generate_with_tools(
         self,
