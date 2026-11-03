@@ -1,6 +1,18 @@
-import json
 import logging
 
+from pydantic import BaseModel, ConfigDict
+
+
+class PromptInjectionResult(BaseModel):
+
+    model_config = ConfigDict(extra="forbid")
+
+    is_injection: bool
+    reason: str
+
+
+
+import logging
 
 
 class PromptInjectionDetector:
@@ -12,13 +24,15 @@ class PromptInjectionDetector:
 
         self.logger = logging.getLogger("uvicorn.error")
 
-
-    async def detect(self, query: str) -> bool:
+    async def detect(self, query: str) -> dict:
 
         if not query or not query.strip():
-            return False
+            return {
+                "is_injection": False,
+                "reason": None
+            }
 
-        prompt_injection_detector_prompt = self.template_parser.get(
+        prompt = self.template_parser.get(
             group="rag",
             key="prompt_injection_detector_prompt",
             vars={
@@ -27,26 +41,35 @@ class PromptInjectionDetector:
         )
 
         try:
-            response = await self.generation_client.generate_text(
-                prompt=prompt_injection_detector_prompt,
+            response = await self.generation_client.generate_structured(
+                prompt=prompt,
+                output_schema=PromptInjectionResult
             )
 
-            result = json.loads(response)
+            if response is None:
+                self.logger.error(
+                    "Prompt injection detection returned None"
+                )
 
-            return {
-                "is_injection": bool(
-                    result.get("is_injection", False)
-                ),
-                "reason": result.get("reason"),
-            }
+                return {
+                    "is_injection": True,
+                    "reason": "Detection failed."
+                }
 
-        except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+            self.logger.info(
+                "Prompt injection detection: %s",
+                response.model_dump()
+            )
+
+            return response.model_dump()
+
+        except Exception:
             self.logger.exception(
-                "Prompt injection detection failed: %s",
-                exc,
+                "Prompt injection detection failed"
             )
 
             return {
                 "is_injection": True,
-                "reason": "Failed to validate the input.",
+                "reason": "Failed to validate the input."
             }
+        
