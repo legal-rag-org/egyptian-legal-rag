@@ -64,6 +64,16 @@ class Settings(BaseSettings):
     OCR_BACKEND: str
     OCR_MODEL_ID: str
 
+    GENERATION_FALLBACKS: str = ""
+    LIGHTWEIGHT_FALLBACKS: str = ""
+    EMBEDDING_FALLBACKS: str = ""
+
+    LLM_MAX_ATTEMPTS: int = 3
+    LLM_INITIAL_RETRY_DELAY: float = 1.0
+    LLM_MAX_RETRY_DELAY: float = 10.0
+    LLM_EXPONENTIAL_BASE: float = 2.0
+    LLM_TIMEOUT: float = 30.0
+
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
