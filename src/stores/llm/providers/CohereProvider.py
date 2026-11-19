@@ -67,30 +67,97 @@ class CohereProvider(LLMInterface):
         max_output_tokens = max_output_tokens if max_output_tokens is not None else self.default_generation_output_max_tokens
         temperature = temperature if temperature is not None else self.default_generation_temperature
 
-        response = self.client.chat(
-            model = self.generation_model_id,
-            chat_history = chat_history,
-            message = self.process_text(prompt),
-            temperature = temperature,
-            max_tokens = max_output_tokens
+        try:
+            response = self.client.chat(
+                model=self.generation_model_id,
+                chat_history=chat_history,
+                message=self.process_text(prompt),
+                temperature=temperature,
+                max_tokens=max_output_tokens
+            )
+
+            if not response or not response.text:
+                raise RuntimeError("Cohere returned an empty response")
+
+            return response.text
+
+        except Exception:
+            self.logger.exception("Error while generating text with Cohere")
+            raise
+    
+    async def generate_structured(
+        self,
+        prompt: str,
+        output_schema: Type[BaseModel],
+        chat_history: list | None = None,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+
+        chat_history = list(chat_history or [])
+
+        if not self.client:
+            self.logger.error("Cohere client was not set")
+            return None
+
+        if not self.generation_model_id:
+            self.logger.error("Generation Model for Cohere was not set")
+            return None
+
+        max_output_tokens = (
+            max_output_tokens
+            if max_output_tokens is not None
+            else self.default_generation_output_max_tokens
         )
 
-        if not response or not response.text:
-            self.logger.error("Error while generating text with CoHere")
-            return None
-        
-        return response.text
+        temperature = (
+            temperature
+            if temperature is not None
+            else self.default_generation_temperature
+        )
 
-    async def generate_structured(
-                self,
-                prompt: str,
-                output_schema: Type[BaseModel],
-                chat_history: list | None = None,
-                max_output_tokens: int = None,
-                temperature: float = None,
-            ):
-    
-            pass
+        # Generate JSON schema from Pydantic model
+        schema = output_schema.model_json_schema()
+
+        structured_prompt = f"""
+    {self.process_text(prompt)}
+
+    You must return a valid JSON object that follows this schema:
+
+    {schema}
+
+    Return only the JSON object without markdown or additional text.
+    """
+
+        try:
+
+            response = self.client.chat(
+                model=self.generation_model_id,
+                chat_history=chat_history,
+                message=structured_prompt,
+                temperature=temperature,
+                max_tokens=max_output_tokens,
+                response_format={
+                    "type": "json_object"
+                },
+            )
+
+            if not response or not response.text:
+                self.logger.error(
+                    "Error while generating structured output with Cohere"
+                )
+                return None
+
+            raw_output = response.text
+
+            return output_schema.model_validate_json(raw_output)
+
+        except Exception:
+            self.logger.exception(
+                "Error while generating structured output with Cohere"
+            )
+            raise
+
 
     async def generate_with_tools(
         self,
@@ -131,21 +198,18 @@ class CohereProvider(LLMInterface):
                 temperature=temperature,
             )
 
-        except Exception as e:
-            self.logger.error(
-                f"Error while generating response with tools: {e}"
+        except Exception:
+            self.logger.exception(
+                "Error while generating response with tools"
             )
-            return None
+            raise
 
         self.logger.info(
             f"Cohere model used: {self.generation_model_id}"
         )
 
         if not response:
-            self.logger.error(
-                "Error while generating response with tools"
-            )
-            return None
+            raise RuntimeError("Cohere returned an empty tools response")
 
         return response.message
 
@@ -178,8 +242,7 @@ class CohereProvider(LLMInterface):
             or not response.embeddings
             or not response.embeddings.float
         ):
-            self.logger.error("Error while embedding texts with CoHere")
-            return None
+            raise RuntimeError("Cohere returned empty embeddings")
         
         return [f for f in response.embeddings.float]
 
