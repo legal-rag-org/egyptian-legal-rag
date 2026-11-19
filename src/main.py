@@ -9,6 +9,8 @@ from sqlalchemy.orm import sessionmaker
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from stores.llm.LLMResilienceFactory import LLMResilienceFactory
+
 from utils.metrics import setup_metrics
 
 
@@ -43,25 +45,26 @@ async def startup_span():
     
 
     llm_provider_factory = LLMProviderFactory(config=settings)
+    resilience_factory = LLMResilienceFactory(provider_factory=llm_provider_factory, settings=settings)
     vectordb_provider_factory = VectorDBProviderFactory(
         config=settings,
         db_client=app.db_client
     )
 
     # Generation client
-    app.generation_client = llm_provider_factory.create(
-        provider=settings.GENERATION_BACKEND
-    )
-    app.generation_client.set_generation_model(
-        model_id=settings.GENERATION_MODEL_ID
+    app.generation_client = resilience_factory.create(
+        backend=settings.GENERATION_BACKEND,
+        model=settings.GENERATION_MODEL_ID,
+        fallbacks=settings.GENERATION_FALLBACKS,
+        client_type="generation",
     )
 
     # ligthweigth client
-    app.ligthweigth_client = llm_provider_factory.create(
-        provider=settings.LIGHTWEIGHT_GENERATION_BACKEND
-    )
-    app.ligthweigth_client.set_generation_model(
-        model_id=settings.LIGHTWEIGHT_GENERATION_MODEL
+    app.ligthweigth_client = resilience_factory.create(
+        backend=settings.LIGHTWEIGHT_GENERATION_BACKEND,
+        model=settings.LIGHTWEIGHT_GENERATION_MODEL,
+        fallbacks=settings.LIGHTWEIGHT_FALLBACKS,
+        client_type="generation",
     )
 
     # OCR client
@@ -73,12 +76,11 @@ async def startup_span():
     )
 
     # Embedding client
-    app.embedding_client = llm_provider_factory.create(
-        provider=settings.EMBEDDING_BACKEND
-    )
-    app.embedding_client.set_embedding_model(
-        model_id=settings.EMBEDDING_MODEL_ID,
-        embedding_size=settings.EMBEDDING_MODEL_SIZE
+    app.embedding_client = resilience_factory.create(
+        backend=settings.EMBEDDING_BACKEND,
+        model=settings.EMBEDDING_MODEL_ID,
+        fallbacks=settings.EMBEDDING_FALLBACKS,
+        client_type="embedding",
     )
 
     # VectorDB client
