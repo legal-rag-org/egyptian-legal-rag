@@ -20,6 +20,8 @@ class SentenceTransformerProvider(LLMInterface):
 
         self.embedding_client = None
 
+        self.enums = None
+
         self.logger = logging.getLogger(__name__)
 
     def set_generation_model(self, model_id: str):
