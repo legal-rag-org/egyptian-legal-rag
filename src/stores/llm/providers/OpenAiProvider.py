@@ -60,12 +60,10 @@ class OpenAiProvider(LLMInterface):
         chat_history = list(chat_history or [])
 
         if not self.client:
-            self.logger.error("OpenAi client was not set")
-            return None
-        
+            raise RuntimeError("OpenAI client was not set")
+
         if not self.generation_model_id:
-            self.logger.error("Generation Model for OpenAi was not set")
-            return None
+            raise RuntimeError("Generation Model for OpenAI was not set")
 
 
         max_output_tokens = max_output_tokens if max_output_tokens is not None else self.default_generation_output_max_tokens
@@ -87,8 +85,7 @@ class OpenAiProvider(LLMInterface):
         )
 
         if not response or not response.choices or len(response.choices) == 0 or not response.choices[0].message:
-            self.logger.error("Error while generating text with OpenAI")
-            return None
+            raise RuntimeError("Error while generating text with OpenAI")
 
         return response.choices[0].message.content
 
@@ -106,12 +103,10 @@ class OpenAiProvider(LLMInterface):
         chat_history = list(chat_history or [])
 
         if not self.client:
-            self.logger.error("OpenAI client was not set")
-            return None
+            raise RuntimeError("OpenAI client was not set")
 
         if not self.generation_model_id:
-            self.logger.error("Generation Model for OpenAI was not set")
-            return None
+            raise RuntimeError("Generation Model for OpenAI was not set")
 
         max_output_tokens = (
             max_output_tokens
@@ -153,34 +148,23 @@ class OpenAiProvider(LLMInterface):
                 or not response.choices
                 or not response.choices[0].message
             ):
-                self.logger.error(
-                    "Error while generating structured output"
-                )
-                return None
+                raise RuntimeError("Error while generating structured output")
 
             message = response.choices[0].message
 
             if message.refusal:
-                self.logger.warning(
-                    f"Structured generation refused: {message.refusal}"
-                )
-                return None
+                raise RuntimeError(f"Structured generation refused: {message.refusal}")
 
             raw_output = message.content
 
             if not raw_output:
-                self.logger.warning(
-                    "Structured generation returned empty output"
-                )
-                return None
+                raise RuntimeError("Structured generation returned empty output")
 
             return output_schema.model_validate_json(raw_output)
 
         except Exception:
-            self.logger.exception(
-                "Error while generating structured output"
-            )
-            return None
+            self.logger.exception("Error while generating structured output")
+            raise
 
 
     async def generate_with_image(
@@ -190,9 +174,11 @@ class OpenAiProvider(LLMInterface):
         image_mime_type: str = "image/png",
         max_output_tokens: int = 4096,
     ):
-        if not self.client or not self.generation_model_id:
-            self.logger.error("OCR client or model was not configured")
-            return None
+        if not self.client:
+            raise RuntimeError("OpenAI client was not configured")
+
+        if not self.generation_model_id:
+            raise RuntimeError("OCR generation model was not configured")
 
         try:
             response = await self.client.chat.completions.create(
@@ -221,14 +207,23 @@ class OpenAiProvider(LLMInterface):
                 temperature=0.0,
             )
 
-            if not response.choices:
-                return None
+            if (
+                not response
+                or not response.choices
+                or not response.choices[0].message
+            ):
+                raise RuntimeError("Empty response from OpenAI OCR")
 
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+
+            if not content:
+                raise RuntimeError("OpenAI OCR returned empty content")
+
+            return content
 
         except Exception:
             self.logger.exception("Error during OCR inference")
-            return None
+            raise
 
     async def generate_with_tools(
         self,
@@ -239,14 +234,10 @@ class OpenAiProvider(LLMInterface):
     ):
 
         if not self.client:
-            self.logger.error("OpenAI client was not set")
-            return None
+            raise RuntimeError("OpenAI client was not set")
 
         if not self.generation_model_id:
-            self.logger.error(
-                "Generation Model for OpenAI was not set"
-            )
-            return None
+            raise RuntimeError("Generation Model for OpenAI was not set")
 
         max_output_tokens = (
             max_output_tokens
@@ -271,10 +262,7 @@ class OpenAiProvider(LLMInterface):
             )
 
         except Exception as e:
-            self.logger.error(
-                f"Error while generating response with tools: {e}"
-            )
-            return None
+            raise RuntimeError(f"Error while generating response with tools: {e}")
 
         self.logger.info(
             f"OpenAI model used: {response.model}"
@@ -285,10 +273,7 @@ class OpenAiProvider(LLMInterface):
             or not response.choices
             or not response.choices[0].message
         ):
-            self.logger.error(
-                "Error while generating response with tools"
-            )
-            return None
+            raise RuntimeError("Error while generating response with tools")
 
         return response.choices[0].message
 
@@ -298,12 +283,10 @@ class OpenAiProvider(LLMInterface):
                    document_type: str=None):
             
         if not self.client:
-                self.logger.error("OpenAi client was not set")
-                return None
+            raise RuntimeError("OpenAi client was not set")
 
         if not self.embedding_model_id:
-                self.logger.error("Embedding Model for OpenAi was not set")
-                return None
+            raise RuntimeError("Embedding Model for OpenAi was not set")
 
         if isinstance(text, str):
             text = [text]
@@ -314,8 +297,7 @@ class OpenAiProvider(LLMInterface):
         )
 
         if not response or not response.data or len(response.data) == 0 or not response.data[0].embedding:
-            self.logger.error("Error while embedding text with OpenAI")
-            return None
+            raise RuntimeError("Error while embedding text with OpenAI")
 
         return [rec.embedding for rec in response.data]
 
