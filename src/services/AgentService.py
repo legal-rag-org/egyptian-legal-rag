@@ -5,6 +5,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+DUPLICATE_CALL_ERROR = (
+    "You already made this exact tool call in this conversation. "
+    "Use the earlier result, or change the arguments / approach."
+)
+
 @dataclass
 class AgentContext:
     project: Any
@@ -37,28 +42,30 @@ class AgentService:
 
         tools = self.tool_registry.get_schemas()
         rag_result = None
+        seen_calls: set[str] = set()
+        trace: list[dict] = []
 
         for iteration in range(1, max_iterations + 1):
 
-            message = await self.llm.generate_with_tools(
-                messages=messages,
-                tools=tools,
-            )
+            message = await self.llm.generate_with_tools(messages=messages, tools=tools)
 
             if not message:
                 self.logger.warning("LLM returned no message at iteration %d", iteration)
                 return self._build_result(
                     answer="حصلت مشكلة في الاتصال بالموديل، حاول تاني.",
                     rag_result=rag_result,
+                    status="llm_error", iterations=iteration, trace=trace,
                 )
 
             tool_calls = getattr(message, "tool_calls", None)
 
             # FINAL ANSWER
             if not tool_calls:
-                return self._build_result(answer=message.content, rag_result=rag_result)
+                return self._build_result(
+                    answer=message.content, rag_result=rag_result,
+                    status="done", iterations=iteration, trace=trace,
+                )
 
-            # ASSISTANT TOOL CALL
             messages.append({
                 "role": "assistant",
                 "content": message.content,
@@ -66,35 +73,65 @@ class AgentService:
                     {
                         "id": tc.id,
                         "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                     }
                     for tc in tool_calls
                 ],
             })
 
-            # EXECUTE TOOLS
-            results = await asyncio.gather(
-                *(self._handle_tool_call(tc, context) for tc in tool_calls)
-            )
 
-            for tool_call, tool_result in results:
+            # to preserve the original order
+            outcomes = [None] * len(tool_calls)
+            pending = []
+            for i, tc in enumerate(tool_calls):
+                key = self._call_key(tc)
+                if key in seen_calls:
+                    outcomes[i] = {"error": DUPLICATE_CALL_ERROR}
+                else:
+                    seen_calls.add(key)
+                    pending.append(i)
+
+            executed = await asyncio.gather(
+                *(self._handle_tool_call(tool_calls[i], context) for i in pending)
+            )
+            for i, (_, res) in zip(pending, executed):
+                outcomes[i] = res
+
+            for tool_call, tool_result in zip(tool_calls, outcomes):
                 if tool_call.function.name == "rag_search" and "error" not in tool_result:
                     rag_result = tool_result
 
+                content = json.dumps(tool_result, ensure_ascii=False) # convert to json
+                trace.append({
+                    "iteration": iteration,
+                    "tool": tool_call.function.name,
+                    "arguments": tool_call.function.arguments,
+                    "ok": "error" not in tool_result,
+                    "result_preview": content[:200],
+                })
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,
-                    "content": json.dumps(tool_result, ensure_ascii=False),
+                    "content": content,
                 })
 
         self.logger.warning("Agent hit max_iterations=%d without a final answer", max_iterations)
         return self._build_result(
             answer="تعذر إكمال الطلب باستخدام الأدوات المتاحة.",
             rag_result=rag_result,
+            status="max_iterations", iterations=max_iterations, trace=trace,
         )
+
+    def _call_key(self, tool_call) -> str:
+        raw = tool_call.function.arguments or "{}"
+
+        try:
+            # sort for {"a" : 1, "b" : 2} to be the same as {"b" : 2, "a" : 1}
+            raw = json.dumps(json.loads(raw), sort_keys=True, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+
+        return f"{tool_call.function.name}: {raw}"
 
     async def _handle_tool_call(self, tool_call, context: AgentContext):
         name = tool_call.function.name
@@ -126,10 +163,14 @@ class AgentService:
             self.logger.exception("Tool %s failed", tool_name)
             return {"error": f"Tool '{tool_name}' failed ({type(e).__name__})."}
 
-    def _build_result(self, answer=None, rag_result=None):
+    def _build_result(self, answer=None, rag_result=None,
+                  status="done", iterations=0, trace=None):
         rag_result = rag_result or {}
         return {
             "answer": answer,
+            "status": status,
+            "iterations": iterations,
+            "trace": trace or [],
             "full_prompt": rag_result.get("full_prompt"),
             "retrieved_documents": rag_result.get("retrieved_documents", []),
             "filters": rag_result.get("filters", {}),
