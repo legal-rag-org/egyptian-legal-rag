@@ -62,5 +62,5 @@ class LLMProviderFactory:
                 default_generation_temperature=self.config.GENERATION_DAFAULT_TEMPERATURE
         )
 
-        return None
+        raise ValueError(f"Unsupported LLM provider: {provider}")
 

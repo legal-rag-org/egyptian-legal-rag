@@ -74,16 +74,10 @@ class GeminiProvider(LLMInterface):
         chat_history = list(chat_history or [])
 
         if not self.client:
-            self.logger.error(
-                "Gemini client was not set"
-            )
-            return None
-
+                    raise RuntimeError("Gemini client was not set")
+        
         if not self.generation_model_id:
-            self.logger.error(
-                "Generation Model for Gemini was not set"
-            )
-            return None
+            raise RuntimeError("Generation Model for Gemini was not set")
 
         if chat_history is None:
             chat_history = []
@@ -155,23 +149,109 @@ class GeminiProvider(LLMInterface):
         )
 
         if not response or not response.text:
-            self.logger.error(
-                "Error while generating text with Gemini"
-            )
-            return None
+            raise RuntimeError("Gemini returned an empty response")
 
         return response.text
 
-    async def generate_structured(
-                self,
-                prompt: str,
-                output_schema: Type[BaseModel],
-                chat_history: list | None = None,
-                max_output_tokens: int = None,
-                temperature: float = None,
-            ):
     
-            pass
+    async def generate_structured(
+        self,
+        prompt: str,
+        output_schema: Type[BaseModel],
+        chat_history: list | None = None,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+
+        chat_history = list(chat_history or [])
+
+        if not self.client:
+            raise RuntimeError("Gemini client was not set")
+
+        if not self.generation_model_id:
+            raise RuntimeError("Generation Model for Gemini was not set")
+
+        max_output_tokens = (
+            max_output_tokens
+            if max_output_tokens is not None
+            else self.default_generation_output_max_tokens
+        )
+
+        temperature = (
+            temperature
+            if temperature is not None
+            else self.default_generation_temperature
+        )
+
+        contents = []
+
+        # Convert chat history to Gemini format
+        for message in chat_history:
+
+            role = message.get("role")
+            content = message.get("content")
+
+            if not content:
+                continue
+
+            if role == GeminiEnums.SYSTEM.value:
+                continue
+
+            if role == GeminiEnums.USER.value:
+                contents.append({
+                    "role": "user",
+                    "parts": [{"text": content}]
+                })
+
+            elif role == GeminiEnums.ASSISTANT.value:
+                contents.append({
+                    "role": "model",
+                    "parts": [{"text": content}]
+                })
+
+        # Add current prompt
+        contents.append({
+            "role": "user",
+            "parts": [{"text": prompt}]
+        })
+
+        try:
+
+            response = self.client.models.generate_content(
+                model=self.generation_model_id,
+                contents=contents,
+                config={
+                    "temperature": temperature,
+                    "max_output_tokens": max_output_tokens,
+                    "response_mime_type": "application/json",
+                    "response_schema": output_schema,
+                }
+            )
+
+            if (
+                not response
+                or not response.candidates
+                or not response.candidates[0].content
+            ):
+                raise RuntimeError(
+                    "Gemini returned an empty structured response"
+                )
+
+            raw_output = response.text
+
+            if not raw_output:
+                raise RuntimeError(
+                    "Gemini structured generation returned empty output"
+                )
+
+            return output_schema.model_validate_json(raw_output)
+        
+        except Exception:
+            self.logger.exception(
+                "Error while generating structured output with Gemini"
+            )
+            raise
+
 
     async def generate_with_tools(
         self,
@@ -182,16 +262,10 @@ class GeminiProvider(LLMInterface):
     ):
 
         if not self.client:
-            self.logger.error(
-                "The Gemini client was not set"
-            )
-            return None
+            raise RuntimeError("Gemini client was not set")
 
         if not self.generation_model_id:
-            self.logger.error(
-                "The Generation model for Gemini was not set"
-            )
-            return None
+            raise RuntimeError("Generation Model for Gemini was not set")
 
         if temperature is None:
             temperature = self.temperature
@@ -219,7 +293,7 @@ class GeminiProvider(LLMInterface):
                 f"Error while generating response with Gemini: {e}"
             )
 
-            return None
+            raise
 
         self.logger.info(
             f"Gemini model used: {self.generation_model_id}"
@@ -231,11 +305,9 @@ class GeminiProvider(LLMInterface):
             or not response.candidates[0].content
         ):
 
-            self.logger.error(
-                "Error while generating response with Gemini"
+            raise RuntimeError(
+                "Gemini returned an empty tools response"
             )
-
-            return None
 
         return response.candidates[0].content
 
@@ -246,16 +318,10 @@ class GeminiProvider(LLMInterface):
     ):
 
         if not self.client:
-            self.logger.error(
-                "Gemini client was not set"
-            )
-            return None
+            raise RuntimeError("Gemini client was not set")
 
         if not self.embedding_model_id:
-            self.logger.error(
-                "Embedding Model for Gemini was not set"
-            )
-            return None
+            raise RuntimeError("Embedding Model for Gemini was not set")
 
         if isinstance(text, str):
             text = [text]
@@ -275,10 +341,9 @@ class GeminiProvider(LLMInterface):
                 or len(response.embeddings) == 0
                 or not response.embeddings[0].values
             ):
-                self.logger.error(
-                    "Error while embedding text with Gemini"
+                raise RuntimeError(
+                    "Gemini returned empty embeddings"
                 )
-                return None
 
             embeddings.append(
                 response.embeddings[0].values

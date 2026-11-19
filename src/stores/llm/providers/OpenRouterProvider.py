@@ -60,29 +60,33 @@ class OpenRouterProvider(LLMInterface):
             else text[:self.default_input_max_characters].strip()
         )
 
-    async def generate_text(self,
-                              prompt: str,
-                              chat_history: list | None = None,
-                              max_output_tokens: int=None,
-                              temperature: float= None):
-    
-        chat_history = list(chat_history or [])
+    async def generate_text(
+        self,
+        prompt: str,
+        chat_history: list | None = None,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
 
         if not self.client:
-            self.logger.error("OpenRouter client was not set")
-            return None
+            raise RuntimeError("OpenRouter client was not set")
 
         if not self.generation_model_id:
-            self.logger.error(
-                "Generation Model for OpenRouter was not set"
-            )
-            return None
+            raise RuntimeError("Generation Model for OpenRouter was not set")
 
-        if chat_history is None:
-            chat_history = []
+        chat_history = list(chat_history or [])
 
-        max_output_tokens = max_output_tokens if max_output_tokens is not None else self.default_generation_output_max_tokens
-        temperature = temperature if temperature is not None else self.default_generation_temperature
+        max_output_tokens = (
+            max_output_tokens
+            if max_output_tokens is not None
+            else self.default_generation_output_max_tokens
+        )
+
+        temperature = (
+            temperature
+            if temperature is not None
+            else self.default_generation_temperature
+        )
 
         chat_history.append(
             self.construct_prompt(
@@ -97,51 +101,34 @@ class OpenRouterProvider(LLMInterface):
             max_tokens=max_output_tokens,
             temperature=temperature,
         )
-        self.logger.info(
-            f"OpenRouter model used: {response.model}"
-        )
 
-        if (
-            not response
-            or not response.choices
-            or len(response.choices) == 0
-            or not response.choices[0].message
-        ):
-            self.logger.error(
-                "Error while generating text with OpenRouter"
-            )
-            return None
+        if not response or not response.choices:
+            raise RuntimeError("Empty response from OpenRouter")
 
-        return response.choices[0].message.content
+        message = response.choices[0].message
+
+        if not message or not message.content:
+            raise RuntimeError("OpenRouter returned empty text")
+
+        self.logger.info(f"OpenRouter model used: {response.model}")
+
+        return message.content
 
     async def generate_structured(
-                self,
-                prompt: str,
-                output_schema: Type[BaseModel],
-                chat_history: list | None = None,
-                max_output_tokens: int = None,
-                temperature: float = None,
-            ):
-    
-            pass
-
-    async def generate_with_tools(
         self,
-        messages: list,
-        tools: list,
+        prompt: str,
+        output_schema: Type[BaseModel],
+        chat_history: list | None = None,
         max_output_tokens: int = None,
         temperature: float = None,
     ):
-
         if not self.client:
-            self.logger.error("OpenRouter client was not set")
-            return None
+            raise RuntimeError("OpenRouter client was not set")
 
         if not self.generation_model_id:
-            self.logger.error(
-                "Generation Model for OpenRouter was not set"
-            )
-            return None
+            raise RuntimeError("Generation Model for OpenRouter was not set")
+
+        chat_history = list(chat_history or [])
 
         max_output_tokens = (
             max_output_tokens
@@ -155,30 +142,119 @@ class OpenRouterProvider(LLMInterface):
             else self.default_generation_temperature
         )
 
-        response = await self.client.chat.completions.create(
-            model=self.generation_model_id,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            max_tokens=max_output_tokens,
-            temperature=temperature,
-        )
-
-        self.logger.info(
-            f"OpenRouter model used: {response.model}"
-        )
-
-        if (
-            not response
-            or not response.choices
-            or not response.choices[0].message
-        ):
-            self.logger.error(
-                "Error while generating response with tools"
+        chat_history.append(
+            self.construct_prompt(
+                prompt=prompt,
+                role=OpenRouterEnum.USER.value,
             )
-            return None
+        )
 
-        return response.choices[0].message
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.generation_model_id,
+                messages=chat_history,
+                max_tokens=max_output_tokens,
+                temperature=temperature,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": output_schema.__name__,
+                        "strict": True,
+                        "schema": output_schema.model_json_schema(),
+                    },
+                },
+                extra_body={
+                    "provider": {
+                        "require_parameters": True,
+                    }
+                },
+            )
+
+            if not response or not response.choices:
+                raise RuntimeError("Empty response from OpenRouter")
+
+            choice = response.choices[0]
+            message = choice.message
+
+            if not message:
+                raise RuntimeError("Empty message from OpenRouter")
+
+            if choice.finish_reason == "length":
+                raise RuntimeError(
+                    "Structured output was truncated because max_output_tokens was reached"
+                )
+
+            if message.refusal:
+                raise RuntimeError(
+                    f"OpenRouter refused structured generation: {message.refusal}"
+                )
+
+            raw_output = message.content
+
+            if not raw_output:
+                raise RuntimeError("OpenRouter returned empty structured output")
+
+            return output_schema.model_validate_json(raw_output)
+
+        except Exception:
+            self.logger.exception(
+                "Error while generating structured output with OpenRouter"
+            )
+            raise
+
+    async def generate_with_tools(
+        self,
+        messages: list,
+        tools: list,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+
+        if not self.client:
+            raise RuntimeError("OpenRouter client was not set")
+
+        if not self.generation_model_id:
+            raise RuntimeError("Generation Model for OpenRouter was not set")
+
+        max_output_tokens = (
+            max_output_tokens
+            if max_output_tokens is not None
+            else self.default_generation_output_max_tokens
+        )
+
+        temperature = (
+            temperature
+            if temperature is not None
+            else self.default_generation_temperature
+        )
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.generation_model_id,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                max_tokens=max_output_tokens,
+                temperature=temperature,
+            )
+
+            if not response or not response.choices:
+                raise RuntimeError("Empty response from OpenRouter tools")
+
+            message = response.choices[0].message
+
+            if not message:
+                raise RuntimeError("Empty message from OpenRouter tools")
+
+            self.logger.info(f"OpenRouter model used: {response.model}")
+
+            return message
+
+        except Exception:
+            self.logger.exception(
+                "Error while generating response with OpenRouter tools"
+            )
+            raise
     
     
 
@@ -189,38 +265,36 @@ class OpenRouterProvider(LLMInterface):
     ):
 
         if not self.client:
-            self.logger.error("OpenRouter client was not set")
-            return None
+            raise RuntimeError("OpenRouter client was not set")
 
         if not self.embedding_model_id:
-            self.logger.error(
-                "Embedding Model for OpenRouter was not set"
-            )
-            return None
+            raise RuntimeError("Embedding Model for OpenRouter was not set")
 
         if isinstance(text, str):
             text = [text]
 
-        response = await self.client.embeddings.create(
-            model=self.embedding_model_id,
-            input=text,
-        )
-
-        if (
-            not response
-            or not response.data
-            or len(response.data) == 0
-            or not response.data[0].embedding
-        ):
-            self.logger.error(
-                "Error while embedding text with OpenRouter"
+        try:
+            response = await self.client.embeddings.create(
+                model=self.embedding_model_id,
+                input=text,
             )
-            return None
 
-        return [
-            record.embedding
-            for record in response.data
-        ]
+            if not response or not response.data:
+                raise RuntimeError("Empty embedding response from OpenRouter")
+
+            if any(not record.embedding for record in response.data):
+                raise RuntimeError("Invalid embedding returned from OpenRouter")
+
+            return [
+                record.embedding
+                for record in response.data
+            ]
+
+        except Exception:
+            self.logger.exception(
+                "Error while generating embeddings with OpenRouter"
+            )
+            raise
 
     def construct_prompt(
         self,
