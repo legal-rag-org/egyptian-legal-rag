@@ -11,6 +11,7 @@ from models import Chunk, Asset
 from models import AssetEnum
 from controllers import NLPController
 from models import MessageModel, ConversationModel
+from models import AgentExecutionModel, AgentStepModel
 from .schemes.data import Asset_config
 
 logger = logging.getLogger("uvicorn.error")
@@ -160,6 +161,13 @@ async def process_endpoint(request: Request, project_id: int, process_request: P
      conversation_model = await ConversationModel.create_instance(
              db_client=request.app.db_client
          )
+     
+     agent_execution_model = await AgentExecutionModel.create_instance(
+             db_client=request.app.db_client
+         )
+     agent_step_model = await AgentStepModel.create_instance(
+             db_client=request.app.db_client
+         )
 
      nlp_controller = NLPController(
              vectordb_client=request.app.vectordb_client,
@@ -170,7 +178,9 @@ async def process_endpoint(request: Request, project_id: int, process_request: P
              message_model=message_model,
              lightweight_client=request.app.ligthweigth_client,
              conversation_model=conversation_model,
-             vision_client=request.app.vision_client 
+             vision_client=request.app.vision_client,
+             agent_execution=agent_execution_model,
+             agent_step=agent_step_model
      )
 
      if do_reset:

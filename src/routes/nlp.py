@@ -4,6 +4,7 @@ from fastapi.encoders import jsonable_encoder
 from .schemes import PushRequest, SearchRequest, ChatRequest
 from models import ProjectModel, ChunkModel
 from models import ConversationModel, MessageModel
+from models import AgentExecutionModel, AgentStepModel
 from controllers import NLPController
 from models.Enums import ResponseSignal
 import logging
@@ -50,6 +51,13 @@ async def index_project(request: Request, project_id: int, push_request: PushReq
                  db_client=request.app.db_client
              )
     
+    agent_execution_model = await AgentExecutionModel.create_instance(
+                 db_client=request.app.db_client
+             )
+    agent_step_model = await AgentStepModel.create_instance(
+                 db_client=request.app.db_client
+             )
+    
     nlp_controller = NLPController(
         vectordb_client=request.app.vectordb_client,
         generation_client=request.app.generation_client,
@@ -59,7 +67,9 @@ async def index_project(request: Request, project_id: int, push_request: PushReq
         message_model=message_model,
         lightweight_client=request.app.ligthweigth_client ,
         conversation_model=conversation_model,
-        vision_client=request.app.vision_client 
+        vision_client=request.app.vision_client,
+        agent_execution=agent_execution_model,
+        agent_step=agent_step_model 
     )
 
     has_records = True
@@ -163,6 +173,13 @@ async def get_project_index_info(request: Request, project_id: int):
     conversation_model = await ConversationModel.create_instance(
                  db_client=request.app.db_client
              )
+    
+    agent_execution_model = await AgentExecutionModel.create_instance(
+                 db_client=request.app.db_client
+             )
+    agent_step_model = await AgentStepModel.create_instance(
+                 db_client=request.app.db_client
+             )
 
     
     nlp_controller = NLPController(
@@ -174,7 +191,9 @@ async def get_project_index_info(request: Request, project_id: int):
         message_model=message_model,
         lightweight_client=request.app.ligthweigth_client,
         conversation_model=conversation_model ,
-        vision_client=request.app.vision_client 
+        vision_client=request.app.vision_client,
+        agent_execution=agent_execution_model,
+        agent_step=agent_step_model
     )
 
     collection_info = await nlp_controller.get_vector_collection_info(
@@ -212,6 +231,14 @@ async def search_index(request: Request, project_id: int, search_request: Search
    conversation_model = await ConversationModel.create_instance(
                 db_client=request.app.db_client
             )
+   
+   agent_execution_model = await AgentExecutionModel.create_instance(
+                db_client=request.app.db_client
+            )
+   
+   agent_step_model = await AgentStepModel.create_instance(
+                db_client=request.app.db_client
+            )
 
     
    nlp_controller = NLPController(
@@ -223,7 +250,9 @@ async def search_index(request: Request, project_id: int, search_request: Search
         message_model=message_model,
         lightweight_client=request.app.ligthweigth_client ,
         conversation_model=conversation_model,
-        vision_client=request.app.vision_client 
+        vision_client=request.app.vision_client,
+        agent_execution=agent_execution_model,
+        agent_step=agent_step_model 
     )
 
    results, filters = await nlp_controller.search_hybrid(
@@ -267,6 +296,14 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
         db_client=request.app.db_client
     )
 
+    agent_execution_model = await AgentExecutionModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    agent_step_model = await AgentStepModel.create_instance(
+        db_client=request.app.db_client
+    )
+
     nlp_controller = NLPController(
         vectordb_client=request.app.vectordb_client,
         generation_client=request.app.generation_client,
@@ -276,7 +313,9 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
         message_model=message_model,
         lightweight_client=request.app.ligthweigth_client,
         conversation_model=conversation_model,
-        vision_client=request.app.vision_client 
+        vision_client=request.app.vision_client,
+        agent_execution=agent_execution_model,
+        agent_step=agent_step_model 
     )
 
     answer, full_prompt, chat_history, retreived_documents, filters, citations = await nlp_controller.answer_rag_questions(
@@ -364,7 +403,17 @@ async def chat(
             content={
                 "signal": ResponseSignal.CONVERSATION_NOT_FOUND.value
             }
-        )
+    )
+
+    agent_execution_model = await AgentExecutionModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+    agent_step_model = await AgentStepModel.create_instance(
+        db_client=request.app.db_client
+    )
+
+
 
     nlp_controller = NLPController(
         vectordb_client=request.app.vectordb_client,
@@ -375,7 +424,9 @@ async def chat(
         message_model=message_model,
         lightweight_client=request.app.ligthweigth_client,
         conversation_model=conversation_model,
-        vision_client=request.app.vision_client 
+        vision_client=request.app.vision_client,
+        agent_execution=agent_execution_model,
+        agent_step=agent_step_model
     )
 
     answer, full_prompt, retrieved_documents, chat_history, rewritten_query, filters, citations = (

@@ -228,6 +228,21 @@ class LLMResilienceService(LLMInterface):
             temperature=temperature
         )
 
+    async def generate_with_tools_detailed(
+        self,
+        messages: list,
+        tools: list,
+        max_output_tokens: int = None,
+        temperature: float = None,
+    ):
+        return await self._execute(
+            "generate_with_tools_detailed",
+            messages=messages,
+            tools=tools,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+        )
+
     async def generate_with_tools(
         self,
         messages: list,

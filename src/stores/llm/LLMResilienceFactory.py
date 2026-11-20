@@ -1,4 +1,3 @@
-
 from stores.llm.LLMResilienceService import LLMResilienceService
 
 from stores.llm.resilience.retry_handler import RetryHandler
@@ -194,13 +193,9 @@ class LLMResilienceFactory:
         )
 
         # 5. Return resilient client
-
         return LLMResilienceService(
             primary_provider=primary_provider,
             primary_provider_name=primary_provider_id,
             retry_handler=retry_handler,
             fallback_handler=fallback_handler,
         )
-
-
-
