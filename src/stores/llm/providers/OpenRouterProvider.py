@@ -7,6 +7,8 @@ import logging
 from typing import List, Union, Type
 from pydantic import BaseModel
 
+from .schemes import LLMToolResponse
+
 
 class OpenRouterProvider(LLMInterface):
 
@@ -202,14 +204,13 @@ class OpenRouterProvider(LLMInterface):
             )
             raise
 
-    async def generate_with_tools(
+    async def generate_with_tools_detailed(
         self,
         messages: list,
         tools: list,
         max_output_tokens: int = None,
         temperature: float = None,
     ):
-
         if not self.client:
             raise RuntimeError("OpenRouter client was not set")
 
@@ -241,20 +242,43 @@ class OpenRouterProvider(LLMInterface):
             if not response or not response.choices:
                 raise RuntimeError("Empty response from OpenRouter tools")
 
-            message = response.choices[0].message
+            choice = response.choices[0]
+            message = choice.message
 
             if not message:
                 raise RuntimeError("Empty message from OpenRouter tools")
 
-            self.logger.info(f"OpenRouter model used: {response.model}")
+            usage = None
 
-            return message
+            if response.usage:
+                usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }
+
+            return LLMToolResponse(
+                message=message,
+                model=response.model,
+                usage=usage,
+                finish_reason=choice.finish_reason,
+                provider="openrouter",
+            )
 
         except Exception:
             self.logger.exception(
                 "Error while generating response with OpenRouter tools"
             )
             raise
+
+    async def generate_with_tools(self, messages, tools, **kwargs):
+        result = await self.generate_with_tools_detailed(
+            messages=messages,
+            tools=tools,
+            **kwargs
+        )
+
+        return result.message
     
     
 

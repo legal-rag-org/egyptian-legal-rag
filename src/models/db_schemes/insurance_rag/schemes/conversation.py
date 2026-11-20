@@ -36,4 +36,9 @@ class Conversation(SQLAlchemyBase):
         back_populates="conversations"
     )
 
+    agent_executions = relationship(
+        "AgentExecution",
+        back_populates="conversation"
+    )
+
 

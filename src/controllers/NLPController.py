@@ -20,6 +20,9 @@ from tools.ToolRegistry import ToolRegistry
 from tools.healthcare.HealthcareTool import HealthcareTool
 from tools.rag.RAGTool import RAGTool
 
+import time
+from utils.agent_metrics import AGENT_EXECUTION_DURATION, AGENT_EXECUTIONS, AGENT_ITERATIONS
+
 
 from fastapi import UploadFile
 import tempfile
@@ -38,7 +41,9 @@ class NLPController(BaseController):
                        message_model,
                        conversation_model,
                        lightweight_client,
-                       vision_client):
+                       vision_client,
+                       agent_execution,
+                       agent_step):
 
         super().__init__()
 
@@ -51,6 +56,8 @@ class NLPController(BaseController):
         self.conversation_model = conversation_model
         self.lightweight_client=lightweight_client
         self.vision_client = vision_client
+        self.agent_execution_model = agent_execution
+        self.agent_step_model = agent_step
 
         self.summary_model = SummaryMemory(
             generation_client=self.lightweight_client,
@@ -812,21 +819,7 @@ class NLPController(BaseController):
             metadata_filters=metadata_filters,
             hyde_passages=hyde_passages
         )
-
-        agent_result = await self.agent_service.run(
-            query=rewrite_query,
-            context=context
-        )
-        answer = agent_result["answer"]
-        full_prompt = agent_result["full_prompt"]
-        retrieved_documents = agent_result["retrieved_documents"]
-        filters = agent_result["filters"]
-        citations = agent_result["citations"]
-
-        if not answer:
-            return answer, full_prompt, retrieved_documents, chat_history, hyde_passages, filters, citations
-
-        # 5. Save user message
+        # 1. Save user message 
         user_message = Message(
             role=self.generation_client.enums.USER.value,
             content=query,
@@ -837,16 +830,136 @@ class NLPController(BaseController):
             message=user_message
         )
 
-        # 6. Save assistant message
-        assistant_message = Message(
-            role=self.generation_client.enums.ASSISTANT.value,
-            content=answer,
-            message_conversation_id=conversation.conversation_id
+        # 2. Create Agent Execution
+        execution = await self.agent_execution_model.create_execution(
+            conversation_id=conversation.conversation_id,
+            user_message_id=user_message.message_id,
         )
 
-        await self.message_model.insert_message(
-            message=assistant_message
-        )
+        total_iterations = 0
+        agent_started_at = None
+        metrics_recorded = False
+
+        try:
+
+            # 3. Run Agent
+            agent_started_at = time.perf_counter()
+
+            agent_result = await self.agent_service.run(
+                query=rewrite_query,
+                context=context,
+                execution_id=execution.agent_execution_id,
+                step_model=self.agent_step_model,
+            )
+
+            execution_duration = time.perf_counter() - agent_started_at
+
+            total_iterations = agent_result.get("iterations", 0)
+
+            answer = agent_result["answer"]
+
+            # Determine actual execution status
+            execution_status = (
+                "success"
+                if agent_result["status"] == "done" and answer
+                else "failed"
+            )
+
+            # Record execution metrics
+            AGENT_EXECUTIONS.labels(
+                status=execution_status
+            ).inc()
+
+            AGENT_EXECUTION_DURATION.observe(execution_duration)
+
+            AGENT_ITERATIONS.observe(total_iterations)
+
+            metrics_recorded = True
+
+            full_prompt = agent_result["full_prompt"]
+            retrieved_documents = agent_result["retrieved_documents"]
+            filters = agent_result["filters"]
+            citations = agent_result["citations"]
+
+
+            # 5. Handle empty answer
+            if not answer:
+
+                await self.agent_execution_model.fail_execution(
+                    execution_id=execution.agent_execution_id,
+                    error=agent_result["status"],
+                    total_iterations=agent_result["iterations"],
+                )
+
+                return (
+                    answer,
+                    full_prompt,
+                    retrieved_documents,
+                    chat_history,
+                    hyde_passages,
+                    filters,
+                    citations
+                )
+
+            # 6. Save assistant message
+            assistant_message = Message(
+                role=self.generation_client.enums.ASSISTANT.value,
+                content=answer,
+                message_conversation_id=conversation.conversation_id
+            )
+
+            await self.message_model.insert_message(
+                message=assistant_message
+            )
+
+            # 7. Update Agent Execution status
+            if agent_result["status"] == "done":
+
+                await self.agent_execution_model.complete_execution(
+                    execution_id=execution.agent_execution_id,
+                    assistant_message_id=assistant_message.message_id,
+                    total_iterations=agent_result["iterations"],
+                )
+
+            else:
+
+                await self.agent_execution_model.fail_execution(
+                    execution_id=execution.agent_execution_id,
+                    error=agent_result["status"],
+                    total_iterations=agent_result["iterations"],
+                    assistant_message_id=assistant_message.message_id,
+                )
+
+        except Exception as e:
+
+            self.logger.exception(
+                "Agent execution failed. Execution ID: %s",
+                execution.agent_execution_id
+            )
+
+            # Record metrics only if not already recorded
+            if agent_started_at is not None and not metrics_recorded:
+
+                execution_duration = time.perf_counter() - agent_started_at
+
+                AGENT_EXECUTIONS.labels(
+                    status="failed"
+                ).inc()
+
+                AGENT_EXECUTION_DURATION.observe(execution_duration)
+
+                AGENT_ITERATIONS.observe(total_iterations)
+
+                metrics_recorded = True
+
+            await self.agent_execution_model.fail_execution(
+                execution_id=execution.agent_execution_id,
+                error=f"{type(e).__name__}: {str(e)}",
+                total_iterations=total_iterations,
+            )
+
+            raise
+
 
         # 7. Load messages again after saving the new turn
         updated_messages = (
