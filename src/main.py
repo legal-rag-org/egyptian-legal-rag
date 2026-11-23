@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from helpers import get_settings
-from routes import base_router, data_router, nlp_router, user_router
+from routes import base_router, data_router, nlp_router, user_router, agent_execution_router
 from helpers import get_settings
 from stores import LLMProviderFactory, VectorDBProviderFactory, RerankerProviderFactory, VisionFactory
 from stores.llm.templates import TemplateParser
@@ -124,6 +124,7 @@ app.include_router(base_router)
 app.include_router(data_router)
 app.include_router(nlp_router)
 app.include_router(user_router)
+app.include_router(agent_execution_router)
 
 
 
