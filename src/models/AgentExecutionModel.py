@@ -1,5 +1,5 @@
 from .BaseDataModel import BaseDataModel
-from .db_schemes.insurance_rag.schemes import AgentExecution
+from .db_schemes.insurance_rag.schemes import AgentExecution, Conversation
 
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -142,3 +142,108 @@ class AgentExecutionModel(BaseDataModel):
             result = await session.execute(stmt)
 
             return result.scalars().all()
+
+
+    async def get_execution_by_uuid_and_user(
+        self,
+        execution_uuid,
+        user_id: int,
+    ):
+        async with self.db_client() as session:
+
+            stmt = (
+                select(AgentExecution)
+                .join(
+                    AgentExecution.conversation
+                )
+                .options(
+                    selectinload(AgentExecution.steps)
+                )
+                .where(
+                    AgentExecution.agent_execution_uuid == execution_uuid,
+                    Conversation.conversation_user_id == user_id,
+                )
+            )
+
+            result = await session.execute(stmt)
+
+            return result.scalar_one_or_none()
+
+
+    async def get_executions_by_user(
+        self,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 10,
+        status: str | None = None,
+        conversation_uuid = None,
+    ):
+
+        async with self.db_client() as session:
+
+            stmt = (
+                select(AgentExecution)
+                .join(AgentExecution.conversation)
+                .where(
+                    Conversation.conversation_user_id == user_id
+                )
+            )
+
+            # Filter by execution status
+            if status is not None:
+                stmt = stmt.where(
+                    AgentExecution.status == status
+                )
+
+            # Filter by conversation UUID
+            if conversation_uuid is not None:
+                stmt = stmt.where(
+                    Conversation.conversation_uuid == conversation_uuid
+                )
+
+            # Order by newest execution first
+            stmt = stmt.order_by(
+                AgentExecution.started_at.desc()
+            )
+
+            # Pagination
+            offset = (page - 1) * page_size
+
+            stmt = stmt.offset(offset).limit(page_size)
+
+            result = await session.execute(stmt)
+
+            return result.scalars().all()
+
+
+    
+    async def count_executions_by_user(
+        self,
+        user_id: int,
+        status: str | None = None,
+        conversation_uuid = None,
+    ):
+
+        async with self.db_client() as session:
+
+            stmt = (
+                select(func.count(AgentExecution.agent_execution_id))
+                .join(AgentExecution.conversation)
+                .where(
+                    Conversation.conversation_user_id == user_id
+                )
+            )
+
+            if status is not None:
+                stmt = stmt.where(
+                    AgentExecution.status == status
+                )
+
+            if conversation_uuid is not None:
+                stmt = stmt.where(
+                    Conversation.conversation_uuid == conversation_uuid
+                )
+
+            result = await session.execute(stmt)
+
+            return result.scalar_one()
