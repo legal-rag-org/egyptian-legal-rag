@@ -20,6 +20,10 @@ from tools.ToolRegistry import ToolRegistry
 from tools.healthcare.HealthcareTool import HealthcareTool
 from tools.rag.RAGTool import RAGTool
 
+
+from opentelemetry import trace as otel_trace
+from opentelemetry.trace import Status, StatusCode
+
 import time
 from utils.agent_metrics import AGENT_EXECUTION_DURATION, AGENT_EXECUTIONS, AGENT_ITERATIONS
 
@@ -111,7 +115,10 @@ class NLPController(BaseController):
         self.rag_tool.set_rag_handler(
             self.answer_rag_questions
         )
+
         self.logger = logging.getLogger("uvicorn")
+
+        self.tracer = otel_trace.get_tracer(__name__)
 
 
     def create_collection_name(self, project_id: str):
@@ -440,8 +447,160 @@ class NLPController(BaseController):
         }
 
 
+    async def _run_generation(
+        self,
+        prompt: str,
+        chat_history: list,
+    ):
+        with self.tracer.start_as_current_span("rag.generation") as span:
+
+            try:
+                answer = await self.generation_client.generate_text(
+                    prompt=prompt,
+                    chat_history=chat_history,
+                )
+
+                span.set_attribute(
+                    "rag.generation.success",
+                    answer is not None,
+                )
+
+                return answer
+
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(
+                    Status(StatusCode.ERROR, "Answer generation failed")
+                )
+                raise
+
+
+    def _run_reranking(
+        self,
+        query: str,
+        documents: list,
+    ):
+        with self.tracer.start_as_current_span("rag.reranking") as span:
+
+            span.set_attribute(
+                "rag.reranking.input_documents",
+                len(documents)
+            )
+
+            reranked_documents = self.reranker_client.rerank(
+                query=query,
+                documents=documents,
+            )
+
+            span.set_attribute(
+                "rag.reranking.output_documents",
+                len(reranked_documents or [])
+            )
+
+            return reranked_documents
+
+
+    async def _run_hybrid_search(
+        self,
+        project: Project,
+        queries: list[str],
+        retrieval_limit: int,
+        filters: dict,
+    ):
+        with self.tracer.start_as_current_span("rag.hybrid_search") as span:
+
+            span.set_attribute(
+                "rag.hybrid_search.query_count",
+                len(queries)
+            )
+
+            search_results = await asyncio.gather(
+                *[
+                    self.search_hybrid(
+                        project=project,
+                        text=search_query,
+                        limit=retrieval_limit,
+                        filters=filters,
+                    )
+                    for search_query in queries
+                ],
+                return_exceptions=True,
+            )
+
+            failed_count = sum(
+                isinstance(result, Exception)
+                for result in search_results
+            )
+
+            span.set_attribute(
+                "rag.hybrid_search.failed_count",
+                failed_count
+            )
+
+            span.set_attribute(
+                "rag.hybrid_search.success_count",
+                len(search_results) - failed_count
+            )
+
+            return search_results
+
+
     
     async def answer_rag_questions(
+        self,
+        project: Project,
+        query: str,
+        limit: int = 10,
+        retrieval_limit: int = 20,
+        chat_history: list | None = None,
+        search_queries: list[str] | None = None,
+        metadata_filters: dict | None = None,
+        hyde_passages: list[str] | None = None,
+    ):
+
+        with self.tracer.start_as_current_span(
+            "rag.pipeline"
+        ) as span:
+
+            span.set_attribute("rag.limit", limit)
+            span.set_attribute("rag.retrieval_limit", retrieval_limit)
+            span.set_attribute(
+                "rag.search_query_count",
+                len(search_queries or [query])
+            )
+            span.set_attribute(
+                "rag.hyde_passage_count",
+                len(hyde_passages or [])
+            )
+            span.set_attribute(
+                "rag.metadata_filter_count",
+                len(metadata_filters or {})
+            )
+
+            try:
+                result = await self._answer_rag_questions(
+                    project=project,
+                    query=query,
+                    limit=limit,
+                    retrieval_limit=retrieval_limit,
+                    chat_history=chat_history,
+                    search_queries=search_queries,
+                    metadata_filters=metadata_filters,
+                    hyde_passages=hyde_passages,
+                )
+
+                span.set_status(Status(StatusCode.OK))
+
+                return result
+
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(
+                    Status(StatusCode.ERROR, "RAG pipeline failed")
+                )
+                raise
+
+    async def _answer_rag_questions(
         self,
         project: Project,
         query: str,
@@ -474,18 +633,12 @@ class NLPController(BaseController):
         self.logger.info("Search queries: %s", queries_to_search)
         self.logger.info("Metadata filters: %s", filters)
 
-        # 2. Execute all hybrid searches concurrently
-        search_results = await asyncio.gather(
-            *[
-                self.search_hybrid(
-                    project=project,
-                    text=search_query,
-                    limit=retrieval_limit,
-                    filters=filters,
-                )
-                for search_query in queries_to_search
-            ],
-            return_exceptions=True,
+        # 2. Execute Hybrid Search
+        search_results = await self._run_hybrid_search(
+            project=project,
+            queries=queries_to_search,
+            retrieval_limit=retrieval_limit,
+            filters=filters,
         )
 
         # 3. Collect ranked lists from all queries
@@ -510,7 +663,6 @@ class NLPController(BaseController):
             if documents:
                 ranked_lists.append(documents)
 
-
         # 4. Apply Global RRF across all query results
         retrieved_documents = self.global_rrf(
             ranked_lists=ranked_lists,
@@ -520,26 +672,41 @@ class NLPController(BaseController):
 
         if not retrieved_documents:
             answer = NLPControllerEnums.NO_AVAILABLE_DOCUMENT_ANSWER.value
-            return answer, full_prompt, chat_history, [], filters, []
 
-        # 4. Rerank the merged results only once
-        reranked_documents = self.reranker_client.rerank(
+            return (
+                answer,
+                full_prompt,
+                chat_history,
+                [],
+                filters,
+                [],
+            )
+
+        # 5. Rerank the merged results
+        reranked_documents = self._run_reranking(
             query=query,
             documents=retrieved_documents,
         )
 
         if not reranked_documents:
-            return answer, full_prompt, chat_history, [], filters, []
+            return (
+                answer,
+                full_prompt,
+                chat_history,
+                [],
+                filters,
+                [],
+            )
 
         retrieved_documents = reranked_documents[:limit]
 
-        # 5. Build citations
+        # 6. Build citations
         citations = [
             self.build_document_citation(doc)
             for doc in retrieved_documents
         ]
 
-        # 6. Construct the LLM prompt
+        # 7. Construct the LLM prompt
         system_prompt = self.template_parser.get(
             group="rag",
             key="system_prompt",
@@ -555,7 +722,7 @@ class NLPController(BaseController):
                     "chunk_metadata": "\n".join([
                         f"المصدر: {doc.source}",
                         f"الصفحة: {doc.page}",
-                        f"اللينك : {doc.file_url}"
+                        f"اللينك : {doc.file_url}",
                     ]),
                 }
             )
@@ -566,23 +733,24 @@ class NLPController(BaseController):
             group="rag",
             key="footer_prompt",
             vars={
-                "query": query
+                "query": query,
             }
         )
 
         system_message = self.generation_client.construct_prompt(
             prompt=system_prompt,
-            role=self.generation_client.enums.SYSTEM.value
+            role=self.generation_client.enums.SYSTEM.value,
         )
 
         chat_history = [system_message] + chat_history
 
         full_prompt = "\n\n".join([
             documents_prompts,
-            footer_prompt
+            footer_prompt,
         ])
 
-        answer = await self.generation_client.generate_text(
+        # 8. Generate answer
+        answer = await self._run_generation(
             prompt=full_prompt,
             chat_history=chat_history,
         )
@@ -595,10 +763,8 @@ class NLPController(BaseController):
             chat_history,
             retrieved_documents,
             filters,
-            citations
+            citations,
         )
-
-
 
     def build_chat_history(self, messages: list):
 
@@ -663,29 +829,119 @@ class NLPController(BaseController):
 
 
 
-    async def _build_query_with_vision(self, query: str, image: UploadFile | None = None) -> str:
-        if not image:
-            return query
+    
+    async def _build_query_with_vision(
+        self,
+        query: str,
+        image: UploadFile | None = None
+    ) -> str:
 
-        vision_context = await self.extract_image_context(image=image)
+        with self.tracer.start_as_current_span(
+            "rag.vision_context"
+        ) as span:
 
-        if not vision_context:
-            return query
+            span.set_attribute(
+                "rag.has_image",
+                image is not None
+            )
 
-        self.logger.info(f"Generated description {vision_context}")
+            try:
+                if not image:
+                    span.set_attribute("rag.vision_used", False)
+                    span.set_status(Status(StatusCode.OK))
+                    return query
 
-        return f"""
-            سؤال المستخدم:
-            {query}
+                vision_context = await self.extract_image_context(
+                    image=image
+                )
 
-            محتوى الصورة:
-            {vision_context}
-            """.strip()
+                if not vision_context:
+                    span.set_attribute("rag.vision_used", False)
+                    span.set_status(Status(StatusCode.OK))
+                    return query
 
+                span.set_attribute("rag.vision_used", True)
+
+                self.logger.info(
+                    "Generated description %s",
+                    vision_context
+                )
+
+                result = f"""
+                    سؤال المستخدم:
+                    {query}
+
+                    محتوى الصورة:
+                    {vision_context}
+                """.strip()
+
+                span.set_status(Status(StatusCode.OK))
+
+                return result
+
+            except Exception as exc:
+                span.record_exception(exc)
+
+                span.set_status(
+                    Status(
+                        StatusCode.ERROR,
+                        "Vision context generation failed"
+                    )
+                )
+
+                raise
+
+
+    
     async def _detect_injection(self, query: str) -> dict:
         return await self.prompt_injection_detector.detect(query=query)
 
+
     async def answer_chat_question(
+        self,
+        project: Project,
+        conversation,
+        query: str,
+        image: UploadFile | None = None,
+        limit: int = 10,
+        retrieval_limit: int = 20,
+        latitude: float | None = None,
+        longitude: float | None = None
+    ):
+
+        with self.tracer.start_as_current_span(
+            "rag.answer_chat_question"
+        ) as span:
+
+            span.set_attribute("rag.limit", limit)
+            span.set_attribute("rag.retrieval_limit", retrieval_limit)
+            span.set_attribute("rag.has_image", image is not None)
+
+            try:
+                result = await self._answer_chat_question(
+                    project=project,
+                    conversation=conversation,
+                    query=query,
+                    image=image,
+                    limit=limit,
+                    retrieval_limit=retrieval_limit,
+                    latitude=latitude,
+                    longitude=longitude
+                )
+
+                span.set_status(Status(StatusCode.OK))
+
+                return result
+
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(
+                    Status(StatusCode.ERROR, "RAG chat question failed")
+                )
+                raise
+
+
+    async def _answer_chat_question(
         self,
         project: Project,
         conversation,
