@@ -16,6 +16,9 @@ from utils.agent_metrics import (
     
 )
 
+from opentelemetry import trace as otel_trace
+from opentelemetry.trace import Status, StatusCode
+
 
 DUPLICATE_CALL_ERROR = (
     "You already made this exact tool call in this conversation. "
@@ -48,9 +51,72 @@ class AgentService:
         self.tool_registry = tool_registry
         self.logger = logging.getLogger("uvicorn")
 
+        self.tracer = otel_trace.get_tracer(__name__)
+
+
+
+
+    async def run(
+        self,
+        query: str,
+        context: AgentContext,
+        execution_id: int,
+        step_model,
+        max_iterations: int = 5,
+    ):
+
+        with self.tracer.start_as_current_span(
+            "agent.run"
+        ) as span:
+
+            span.set_attribute(
+                "agent.execution_id",
+                execution_id
+            )
+
+            span.set_attribute(
+                "agent.max_iterations",
+                max_iterations
+            )
+
+            try:
+
+                result = await self._run(
+                    query=query,
+                    context=context,
+                    execution_id=execution_id,
+                    step_model=step_model,
+                    max_iterations=max_iterations,
+                )
+
+                span.set_attribute(
+                    "agent.status",
+                    result["status"]
+                )
+
+                span.set_attribute(
+                    "agent.iterations",
+                    result["iterations"]
+                )
+
+                return result
+
+            except Exception as exc:
+
+                span.record_exception(exc)
+
+                span.set_status(
+                    Status(
+                        StatusCode.ERROR,
+                        "Agent execution failed"
+                    )
+                )
+
+                raise
+
         
     
-    async def run(
+    async def _run(
         self,
         query: str,
         context: AgentContext,
@@ -73,21 +139,100 @@ class AgentService:
             start_time = time.perf_counter()
 
             try:
-                llm_response = await self.llm.generate_with_tools_detailed(
-                    messages=messages,
-                    tools=tools,
-                )
+
+                with self.tracer.start_as_current_span(
+                    "agent.llm_call"
+                ) as llm_span:
+
+                    # Basic attributes
+                    llm_span.set_attribute(
+                        "agent.iteration",
+                        iteration
+                    )
+
+                    llm_span.set_attribute(
+                        "llm.message_count",
+                        len(messages)
+                    )
+
+                    llm_span.set_attribute(
+                        "llm.available_tools",
+                        len(tools)
+                    )
+
+                    try:
+
+                        llm_response = await self.llm.generate_with_tools_detailed(
+                            messages=messages,
+                            tools=tools,
+                        )
+
+                        message = llm_response.message
+
+                        if not message:
+                            raise RuntimeError(
+                                "LLM returned an empty message"
+                            )
+
+                        provider = llm_response.provider or "unknown"
+                        usage = llm_response.usage or {}
+
+                        # Provider and Model
+                        llm_span.set_attribute(
+                            "llm.provider",
+                            provider
+                        )
+
+                        if llm_response.model:
+                            llm_span.set_attribute(
+                                "llm.model",
+                                llm_response.model
+                            )
+
+                        # Token Usage
+                        llm_span.set_attribute(
+                            "llm.prompt_tokens",
+                            usage.get("prompt_tokens", 0)
+                        )
+
+                        llm_span.set_attribute(
+                            "llm.completion_tokens",
+                            usage.get("completion_tokens", 0)
+                        )
+
+                        # Tool Calls
+                        llm_span.set_attribute(
+                            "llm.tool_call_count",
+                            len(message.tool_calls or [])
+                        )
+
+                        # Finish Reason
+                        if llm_response.finish_reason:
+                            llm_span.set_attribute(
+                                "llm.finish_reason",
+                                llm_response.finish_reason
+                            )
+
+                        llm_span.set_status(
+                            Status(StatusCode.OK)
+                        )
+
+                    except Exception as exc:
+
+                        llm_span.record_exception(exc)
+
+                        llm_span.set_status(
+                            Status(
+                                StatusCode.ERROR,
+                                "LLM call failed"
+                            )
+                        )
+
+                        raise
 
                 llm_duration_ms = (
                     time.perf_counter() - start_time
                 ) * 1000
-
-                message = llm_response.message
-
-                if not message:
-                    raise RuntimeError("LLM returned an empty message")
-
-                provider = llm_response.provider or "unknown"
 
                 # LLM Metrics
 
@@ -289,17 +434,62 @@ class AgentService:
             async def execute_with_timing(index: int):
 
                 tool_call = tool_calls[index]
+                tool_name = tool_call.function.name
 
                 start_time = time.perf_counter()
 
-                _, result = await self._handle_tool_call(
-                    tool_call,
-                    context,
-                )
+                with self.tracer.start_as_current_span(
+                    f"agent.tool.{tool_name}"
+                ) as tool_span:
 
-                tool_duration_ms = int(
-                    (time.perf_counter() - start_time) * 1000
-                )
+                    tool_span.set_attribute("tool.name", tool_name)
+                    tool_span.set_attribute("tool.call_id", tool_call.id)
+                    tool_span.set_attribute("agent.iteration", iteration)
+
+                    try:
+                        _, result = await self._handle_tool_call(
+                            tool_call,
+                            context
+                        )
+
+                        is_success = "error" not in result
+
+                        tool_span.set_attribute(
+                            "tool.status",
+                            "success" if is_success else "failed"
+                        )
+
+                        if is_success:
+                            tool_span.set_status(Status(StatusCode.OK))
+                        else:
+                            tool_span.set_status(
+                                Status(
+                                    StatusCode.ERROR,
+                                    str(result["error"])
+                                )
+                            )
+
+                    except Exception as exc:
+
+                        tool_span.record_exception(exc)
+
+                        tool_span.set_status(
+                            Status(
+                                StatusCode.ERROR,
+                                "Tool execution failed"
+                            )
+                        )
+
+                        raise
+
+                    tool_duration_ms = int(
+                        (time.perf_counter() - start_time) * 1000
+                    )
+
+                    tool_span.set_attribute(
+                        "tool.duration_ms",
+                        tool_duration_ms
+                    )
 
                 # Parse tool arguments
                 try:
@@ -320,8 +510,6 @@ class AgentService:
                 is_success = "error" not in result
 
                 # Tool Metrics
-                tool_name = tool_call.function.name
-
                 AGENT_TOOL_CALLS.labels(
                     tool_name=tool_name,
                     status="success" if is_success else "failed",
@@ -331,13 +519,13 @@ class AgentService:
                     tool_name=tool_name,
                 ).observe(tool_duration_ms / 1000)
 
-                # Persist tool step immediately
+                # Persist tool step
                 await step_model.create_step(
                     execution_id=execution_id,
                     iteration=iteration,
                     step_type="tool_call",
                     status="success" if is_success else "failed",
-                    tool_name=tool_call.function.name,
+                    tool_name=tool_name,
                     tool_call_id=tool_call.id,
                     input_data=input_data,
                     output_data=result,
@@ -346,6 +534,7 @@ class AgentService:
                 )
 
                 return index, result, tool_duration_ms
+
 
             executed = await asyncio.gather(
                 *(execute_with_timing(i) for i in pending)

@@ -13,8 +13,16 @@ from stores.llm.LLMResilienceFactory import LLMResilienceFactory
 
 from utils.metrics import setup_metrics
 
+from stores.tracing.TracingConfig import setup_tracing
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
 
 app = FastAPI()
+
+# OpenTelemetry Tracing
+setup_tracing()
+
+FastAPIInstrumentor.instrument_app(app)
 
 # CORS
 app.add_middleware(

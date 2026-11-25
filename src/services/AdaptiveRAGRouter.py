@@ -3,6 +3,9 @@ import logging
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
 
 class FeatureRouting(BaseModel):
 
@@ -28,6 +31,7 @@ class AdaptiveRAGRouter:
         self.generation_model = generation_model
         self.template_parser = template_parser
         self.logger = logging.getLogger(__name__)
+        self.tracer = trace.get_tracer(__name__)
 
     def _get_default_routing_plan(self) -> dict:
         return {
@@ -96,37 +100,90 @@ class AdaptiveRAGRouter:
 
         return valid_plan
 
+    
     async def route(
         self,
         query: str,
         conversation_context: str = ""
     ) -> dict:
 
-        try:
-            prompt = self.template_parser.get(
-                group="rag",
-                key="router_prompt",
-                vars={
-                    "query": query,
-                    "conversation_context": conversation_context
-                }
-            )
+        with self.tracer.start_as_current_span(
+            "rag.adaptive_routing"
+        ) as span:
 
-            response = await self.generation_model.generate_structured(
-                prompt=prompt,
-                output_schema=AdaptiveRAGRoutingPlan
-            )
+            span.set_attribute("rag.routing.query_length", len(query))
 
-            if response is None:
-                self.logger.warning(
-                    "Adaptive RAG Router returned None falling back to static rag pipeline"
+            try:
+                prompt = self.template_parser.get(
+                    group="rag",
+                    key="router_prompt",
+                    vars={
+                        "query": query,
+                        "conversation_context": conversation_context
+                    }
                 )
-                return self._get_default_routing_plan()
 
-            routing_plan = response.model_dump(exclude_none=True)
+                response = await self.generation_model.generate_structured(
+                    prompt=prompt,
+                    output_schema=AdaptiveRAGRoutingPlan
+                )
 
-            return self._validate_routing_plan(routing_plan)
+                if response is None:
+                    self.logger.warning(
+                        "Adaptive RAG Router returned None falling back to static rag pipeline"
+                    )
 
-        except Exception:
-            self.logger.exception("Adaptive RAG Router failed.")
-            return self._get_default_routing_plan()
+                    routing_plan = self._get_default_routing_plan()
+                    span.set_attribute("rag.routing.fallback", True)
+
+                else:
+                    routing_plan = self._validate_routing_plan(
+                        response.model_dump(exclude_none=True)
+                    )
+
+                    span.set_attribute("rag.routing.fallback", False)
+
+                # Record each feature's routing decision
+                for feature, config in routing_plan.items():
+
+                    span.set_attribute(
+                        f"rag.routing.{feature}.enabled",
+                        config["enabled"]
+                    )
+
+                    span.set_attribute(
+                        f"rag.routing.{feature}.reason",
+                        config["reason"]
+                    )
+
+                span.set_status(Status(StatusCode.OK))
+
+                return routing_plan
+
+            except Exception as exc:
+                self.logger.exception("Adaptive RAG Router failed.")
+
+                span.record_exception(exc)
+
+                routing_plan = self._get_default_routing_plan()
+
+                span.set_attribute("rag.routing.fallback", True)
+                span.set_attribute("rag.routing.fallback_reason", str(exc))
+
+                # Record the default routing decisions
+                for feature, config in routing_plan.items():
+
+                    span.set_attribute(
+                        f"rag.routing.{feature}.enabled",
+                        config["enabled"]
+                    )
+
+                    span.set_attribute(
+                        f"rag.routing.{feature}.reason",
+                        config["reason"]
+                    )
+
+                # Fallback succeeded, so the operation completed successfully.
+                span.set_status(Status(StatusCode.OK))
+
+                return routing_plan

@@ -1,4 +1,13 @@
-from fastapi import APIRouter, Request, Depends, HTTPException, Query, JSONResponse, status
+from fastapi import (
+    APIRouter,
+    Request,
+    Depends,
+    HTTPException,
+    Query,
+    status
+)
+
+from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 
 from utils.auth import get_current_user
