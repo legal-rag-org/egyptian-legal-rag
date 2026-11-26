@@ -7,7 +7,7 @@ from stores.vectordb.VectorDBEnums import PgVectorTableSchemeEnums
 import logging
 from models.db_schemes import RetrievedDocument
 from services.MetadataFilterExtractor import MetadataFilterExtractor
-from services.SummaryMemory import SummaryMemory
+from memory.SummaryMemory import SummaryMemory
 from .enums.nlp import NLPControllerEnums
 from services.PromptInjuction import PromptInjectionDetector
 from services.AdaptiveRAGRouter import AdaptiveRAGRouter
@@ -23,6 +23,10 @@ from tools.rag.RAGTool import RAGTool
 
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import Status, StatusCode
+
+from memory.MemoryExtractor import MemoryExtractor
+from memory.UserMemoryService import UserMemoryService
+from memory.MemoryConsolidation import MemoryConsolidation
 
 import time
 from utils.agent_metrics import AGENT_EXECUTION_DURATION, AGENT_EXECUTIONS, AGENT_ITERATIONS
@@ -47,7 +51,8 @@ class NLPController(BaseController):
                        lightweight_client,
                        vision_client,
                        agent_execution,
-                       agent_step):
+                       agent_step,
+                       memory_model):
 
         super().__init__()
 
@@ -62,6 +67,7 @@ class NLPController(BaseController):
         self.vision_client = vision_client
         self.agent_execution_model = agent_execution
         self.agent_step_model = agent_step
+        self.memory_model = memory_model
 
         self.summary_model = SummaryMemory(
             generation_client=self.lightweight_client,
@@ -95,6 +101,22 @@ class NLPController(BaseController):
         self.hyde = HyDE(
             generation_model=self.lightweight_client,
             template_parser=self.template_parser
+        )
+
+        self.memory_extractor = MemoryExtractor(
+            generation_model=self.lightweight_client,
+            template_parser=self.template_parser,
+        )
+
+        self.user_memory_service = UserMemoryService(
+            memory_model=self.memory_model,
+            embedding_client=self.embedding_client,
+        )
+
+        self.memory_consolidation = MemoryConsolidation(
+            generation_model=self.lightweight_client,
+            template_parser=self.template_parser,
+            user_memory_service=self.user_memory_service
         )
 
         tool_registry = ToolRegistry()
@@ -790,11 +812,14 @@ class NLPController(BaseController):
 
         return chat_history
 
-    def build_rewrite_history(self, messages: list) -> str:
+    def build_text_history(self, messages: list) -> str:
 
         history = []
 
         for message in messages:
+
+            if message.role not in {"user", "assistant"}:
+                continue
 
             history.append(
                 f"{message.role}: {message.content}"
@@ -897,6 +922,127 @@ class NLPController(BaseController):
         return await self.prompt_injection_detector.detect(query=query)
 
 
+    
+    async def _extract_and_save_memories(self, conversation):
+
+        try:
+            # 1. Get current memory checkpoint
+            memory_last_message_id = conversation.memory_last_message_id
+
+            # 2. Fetch new messages
+            new_messages = await self.message_model.get_messages_after_id(
+                conversation_id=conversation.conversation_id,
+                last_message_id=memory_last_message_id,
+                limit=50,
+            )
+
+            if not new_messages:
+                return
+
+            # 3. Keep user messages only
+            user_messages = [
+                message
+                for message in new_messages
+                if message.role == self.generation_client.enums.USER.value
+            ]
+
+            # 4. Build extraction input
+            conversation_text = "\n".join(
+                message.content
+                for message in user_messages
+                if message.content and message.content.strip()
+            )
+            if not conversation_text:
+                updated = await self.conversation_model.update_memory_checkpoint(
+                    conversation_id=conversation.conversation_id,
+                    last_message_id=new_messages[-1].message_id,
+                    expected_last_message_id=memory_last_message_id,
+                )
+
+                if not updated:
+                    self.logger.warning(
+                        "Memory checkpoint update skipped due to concurrent modification."
+                    )
+
+                return
+
+            # 5. Extract memories from user messages
+            extracted_memories = await self.memory_extractor.extract_memories(
+                conversation=conversation_text,
+                previous_summary=conversation.summary,
+            )
+
+            # Extraction failed: keep checkpoint unchanged
+            if extracted_memories is None:
+                self.logger.warning(
+                    "Memory extraction failed for conversation %s.",
+                    conversation.conversation_id,
+                )
+                return
+
+            # No useful memories found: mark messages as processed
+            if not extracted_memories:
+                updated = await self.conversation_model.update_memory_checkpoint(
+                    conversation_id=conversation.conversation_id,
+                    last_message_id=new_messages[-1].message_id,
+                    expected_last_message_id=memory_last_message_id,
+                )
+
+                if not updated:
+                    self.logger.warning(
+                        "Memory checkpoint update skipped due to concurrent modification."
+                    )
+
+                return
+
+            # 6. Consolidate and apply each extracted memory
+            consolidation_results = []
+
+            for new_memory in extracted_memories:
+
+                # 6.1 Compare the new memory with existing memories
+                decision = await self.memory_consolidation.consolidate_memory(
+                    user_id=conversation.conversation_user_id,
+                    new_memory=new_memory,
+                )
+
+                # 6.2 Apply the consolidation decision
+                result = await self.user_memory_service.apply_consolidation_decision(
+                    user_id=conversation.conversation_user_id,
+                    new_memory=new_memory,
+                    decision=decision,
+                    source_conversation_id=conversation.conversation_id,
+                )
+
+                consolidation_results.append(result)
+
+                self.logger.info(
+                    "Memory consolidated successfully. "
+                    "Conversation: %s, Action: %s",
+                    conversation.conversation_id,
+                    result["action"],
+                )
+
+            # 7. Update checkpoint after all memories are processed
+            updated = await self.conversation_model.update_memory_checkpoint(
+                conversation_id=conversation.conversation_id,
+                last_message_id=new_messages[-1].message_id,
+                expected_last_message_id=memory_last_message_id,
+            )
+
+            if not updated:
+                self.logger.warning(
+                    "Memory checkpoint update skipped due to concurrent modification."
+                )
+
+                
+        except Exception:
+            self.logger.exception(
+                "Failed to update memory checkpoint for conversation %s.",
+                conversation.conversation_id,
+            )
+
+
     async def answer_chat_question(
         self,
         project: Project,
@@ -967,8 +1113,9 @@ class NLPController(BaseController):
 
 
         # 1. Load previous messages
-        messages = await self.message_model.get_messages_by_conversation_id(
+        messages = await self.message_model.get_latest_messages(
             conversation_id=conversation.conversation_id,
+            limit=20,
         )
 
         # 2. Get previous conversation summary
@@ -981,7 +1128,7 @@ class NLPController(BaseController):
 
 
         # For query rewriting
-        rewrite_history = self.build_rewrite_history(
+        rewrite_history = self.build_text_history(
             messages=messages
         )
 
@@ -1063,9 +1210,51 @@ class NLPController(BaseController):
                     "Metadata filtering failed. Continuing without filters."
                 )
 
+        retrieved_memories = []
+
+        with self.tracer.start_as_current_span(
+            "memory.retrieval"
+        ) as span:
+
+            try:
+                memory_results = await self.user_memory_service.get_memories(
+                    user_id=conversation.conversation_user_id,
+                    query=rewrite_query,
+                    top_k=5,
+                    max_distance=None,
+                )
+
+                retrieved_memories = [
+                    {
+                        "content": item["memory"].content,
+                        "memory_type": item["memory"].memory_type,
+                        "importance": item["memory"].importance,
+                    }
+                    for item in memory_results
+                ]
+
+                span.set_attribute(
+                    "memory.retrieved_count",
+                    len(retrieved_memories)
+                )
+
+                span.set_status(Status(StatusCode.OK))
+
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(
+                    Status(StatusCode.ERROR, "Memory retrieval failed")
+                )
+
+                self.logger.exception(
+                    "Failed to retrieve long-term memories"
+                )
+
         context = AgentContext(
             project=project,
             chat_history=chat_history,
+            conversation_summary=previous_summary,
+            retrieved_memories=retrieved_memories,
             limit=limit,
             retrieval_limit=retrieval_limit,
             latitude=latitude,
@@ -1157,6 +1346,7 @@ class NLPController(BaseController):
                     citations
                 )
 
+            
             # 6. Save assistant message
             assistant_message = Message(
                 role=self.generation_client.enums.ASSISTANT.value,
@@ -1167,7 +1357,6 @@ class NLPController(BaseController):
             await self.message_model.insert_message(
                 message=assistant_message
             )
-
             # 7. Update Agent Execution status
             if agent_result["status"] == "done":
 
@@ -1176,6 +1365,19 @@ class NLPController(BaseController):
                     assistant_message_id=assistant_message.message_id,
                     total_iterations=agent_result["iterations"],
                 )
+
+                # 8. Extract and save user memories
+                try:
+                    await self._extract_and_save_memories(
+                        conversation=conversation,
+                    )
+
+                except Exception:
+                    self.logger.exception(
+                        "Memory processing failed, but agent execution was completed. "
+                        "Conversation ID: %s",
+                        conversation.conversation_id,
+                    )
 
             else:
 
@@ -1217,37 +1419,39 @@ class NLPController(BaseController):
             raise
 
 
-        # 7. Load messages again after saving the new turn
-        updated_messages = (
-            await self.message_model.get_messages_by_conversation_id(
-                conversation_id=conversation.conversation_id,
-            )
+        summary_last_message_id = conversation.summary_last_message_id
+
+        new_messages = await self.message_model.get_messages_after_id(
+            conversation_id=conversation.conversation_id,
+            last_message_id=summary_last_message_id,
+            limit=6,
         )
 
-        # 8. Check if it's time to generate a new summary
-        message_count = len(updated_messages)
+        if len(new_messages) == 6:
 
-        if message_count > 0 and message_count % 6 == 0:
-
-            # Get only the latest 6 messages
-            recent_messages = updated_messages[-6:]
-
-            # Convert recent messages to text
-            recent_history = self.build_rewrite_history(
-                messages=recent_messages
+            new_history = self.build_text_history(
+                messages=new_messages
             )
 
-            # 9. Generate updated rolling summary
             new_summary = await self.summary_model.summarize(
-                conversation=recent_history,
-                previous_summary=previous_summary
+                conversation=new_history,
+                previous_summary=previous_summary,
             )
 
-            # 10. Save the updated summary
-            await self.conversation_model.update_summary(
-                conversation_id=conversation.conversation_id,
-                summary=new_summary
-            )
+            if new_summary is not None:
+                last_message_id = new_messages[-1].message_id
+
+                updated = await self.conversation_model.update_summary(
+                    conversation_id=conversation.conversation_id,
+                    summary=new_summary,
+                    last_message_id=last_message_id,
+                    expected_last_message_id=summary_last_message_id
+                )
+
+                if not updated:
+                    self.logger.info(
+                        "Summary update skipped because checkpoint changed concurrently."
+                    )
 
 
         return answer, full_prompt, retrieved_documents, chat_history, hyde_passages, filters, citations

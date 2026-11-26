@@ -10,14 +10,18 @@ class SummaryMemory:
         self.logger = logging.getLogger("uvicorn.error")
 
 
-    async def summarize(self, conversation, previous_summary: str | None = None):
+    async def summarize(
+        self,
+        conversation,
+        previous_summary: str | None = None,
+    ) -> str | None:
 
         summary_memory_prompt = self.template_parser.get(
             group="rag",
             key="summary_memory_prompt",
             vars={
                 "conversation": conversation,
-                "previous_summary":previous_summary or "",
+                "previous_summary": previous_summary or "",
             },
         )
 
@@ -26,14 +30,19 @@ class SummaryMemory:
                 prompt=summary_memory_prompt
             )
 
+            if not isinstance(response, str):
+                self.logger.warning(
+                    "Summary memory generation returned an invalid response type."
+                )
+                return None
+
             summary = response.strip()
 
             if not summary:
                 self.logger.warning(
                     "Summary memory generation returned an empty response."
                 )
-
-                return previous_summary or ""
+                return None
 
             return summary
 
@@ -41,5 +50,4 @@ class SummaryMemory:
             self.logger.exception(
                 "Error while generating conversation summary."
             )
-
-            return previous_summary or ""
+            return None

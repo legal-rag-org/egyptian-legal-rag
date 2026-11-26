@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 from typing import Optional
 from uuid import UUID
 from models.UserModel import UserModel
+from models.UserMemoryModel import UserMemoryModel
 
 from utils.auth import get_current_user
 
@@ -33,31 +34,35 @@ async def index_project(request: Request, project_id: int, push_request: PushReq
 
     if not project:
         return JSONResponse(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    content = {
-                        "signal": ResponseSignal.PROJECT_NOT_FOUND_ERROR.value
-                    }
-                )
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content = {
+                "signal": ResponseSignal.PROJECT_NOT_FOUND_ERROR.value
+            }
+        )
 
     chunk_model = await ChunkModel.create_instance(
         db_client=request.app.db_client
     )
 
     message_model = await MessageModel.create_instance(
-            db_client=request.app.db_client
-        )
+        db_client=request.app.db_client
+    )
 
     conversation_model = await ConversationModel.create_instance(
-                 db_client=request.app.db_client
-             )
+        db_client=request.app.db_client
+    )
     
     agent_execution_model = await AgentExecutionModel.create_instance(
-                 db_client=request.app.db_client
-             )
+        db_client=request.app.db_client
+    )
     agent_step_model = await AgentStepModel.create_instance(
-                 db_client=request.app.db_client
-             )
-    
+        db_client=request.app.db_client
+    )
+
+    user_memory_model = await UserMemoryModel.create_instance(
+        db_client=request.app.db_client
+    )
+
     nlp_controller = NLPController(
         vectordb_client=request.app.vectordb_client,
         generation_client=request.app.generation_client,
@@ -69,7 +74,8 @@ async def index_project(request: Request, project_id: int, push_request: PushReq
         conversation_model=conversation_model,
         vision_client=request.app.vision_client,
         agent_execution=agent_execution_model,
-        agent_step=agent_step_model 
+        agent_step=agent_step_model,
+        memory_model=user_memory_model,
     )
 
     has_records = True
@@ -131,11 +137,11 @@ async def index_project(request: Request, project_id: int, push_request: PushReq
 
         if not is_inserted:
             return JSONResponse(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        content = {
-                            "signal": ResponseSignal.INSERT_INTO_VECTOR_DB_ERROR.value
-                        }
-                    )
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content = {
+                    "signal": ResponseSignal.INSERT_INTO_VECTOR_DB_ERROR.value
+                }
+            )
         
         inserted_chunks_into_vdb += len(page_chunks)
         pbar.update(len(page_chunks))
@@ -143,11 +149,11 @@ async def index_project(request: Request, project_id: int, push_request: PushReq
 
 
     return JSONResponse(
-                    content = {
-                        "signal": ResponseSignal.INSERT_INTO_VECTOR_DB_SUCCESS.value,
-                        "inserted_chunks" : inserted_chunks_into_vdb
-                    }
-                )
+        content = {
+            "signal": ResponseSignal.INSERT_INTO_VECTOR_DB_SUCCESS.value,
+            "inserted_chunks" : inserted_chunks_into_vdb
+        }
+    )
 
 
 @nlp_router.get("/index/info/{project_id}")
@@ -167,19 +173,22 @@ async def get_project_index_info(request: Request, project_id: int):
         )
 
     message_model = await MessageModel.create_instance(
-            db_client=request.app.db_client
-        )
+        db_client=request.app.db_client
+    )
 
     conversation_model = await ConversationModel.create_instance(
-                 db_client=request.app.db_client
-             )
+        db_client=request.app.db_client
+    )
     
     agent_execution_model = await AgentExecutionModel.create_instance(
-                 db_client=request.app.db_client
-             )
+        db_client=request.app.db_client
+    )
     agent_step_model = await AgentStepModel.create_instance(
-                 db_client=request.app.db_client
-             )
+        db_client=request.app.db_client
+    )
+    user_memory_model = await UserMemoryModel.create_instance(
+        db_client=request.app.db_client
+    )
 
     
     nlp_controller = NLPController(
@@ -193,7 +202,8 @@ async def get_project_index_info(request: Request, project_id: int):
         conversation_model=conversation_model ,
         vision_client=request.app.vision_client,
         agent_execution=agent_execution_model,
-        agent_step=agent_step_model
+        agent_step=agent_step_model,
+        memory_model=user_memory_model,
     )
 
     collection_info = await nlp_controller.get_vector_collection_info(
@@ -229,16 +239,20 @@ async def search_index(request: Request, project_id: int, search_request: Search
        )
 
    conversation_model = await ConversationModel.create_instance(
-                db_client=request.app.db_client
-            )
-   
+        db_client=request.app.db_client
+    )
+
    agent_execution_model = await AgentExecutionModel.create_instance(
-                db_client=request.app.db_client
-            )
+        db_client=request.app.db_client
+    )
    
    agent_step_model = await AgentStepModel.create_instance(
-                db_client=request.app.db_client
-            )
+        db_client=request.app.db_client
+    )
+   
+   user_memory_model = await UserMemoryModel.create_instance(
+        db_client=request.app.db_client
+    )
 
     
    nlp_controller = NLPController(
@@ -252,7 +266,8 @@ async def search_index(request: Request, project_id: int, search_request: Search
         conversation_model=conversation_model,
         vision_client=request.app.vision_client,
         agent_execution=agent_execution_model,
-        agent_step=agent_step_model 
+        agent_step=agent_step_model,
+        memory_model=user_memory_model,
     )
 
    results, filters = await nlp_controller.search_hybrid(
@@ -304,6 +319,11 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
         db_client=request.app.db_client
     )
 
+    user_memory_model = await UserMemoryModel.create_instance(
+            db_client=request.app.db_client
+        )
+    
+
     nlp_controller = NLPController(
         vectordb_client=request.app.vectordb_client,
         generation_client=request.app.generation_client,
@@ -315,7 +335,8 @@ async def answer_rag(request: Request, project_id: int, search_request: SearchRe
         conversation_model=conversation_model,
         vision_client=request.app.vision_client,
         agent_execution=agent_execution_model,
-        agent_step=agent_step_model 
+        agent_step=agent_step_model,
+        memory_model=user_memory_model,
     )
 
     answer, full_prompt, chat_history, retreived_documents, filters, citations = await nlp_controller.answer_rag_questions(
@@ -413,6 +434,11 @@ async def chat(
         db_client=request.app.db_client
     )
 
+    user_memory_model = await UserMemoryModel.create_instance(
+        db_client=request.app.db_client
+    )
+    
+
 
 
     nlp_controller = NLPController(
@@ -426,7 +452,8 @@ async def chat(
         conversation_model=conversation_model,
         vision_client=request.app.vision_client,
         agent_execution=agent_execution_model,
-        agent_step=agent_step_model
+        agent_step=agent_step_model,
+        memory_model=user_memory_model,
     )
 
     answer, full_prompt, retrieved_documents, chat_history, rewritten_query, filters, citations = (

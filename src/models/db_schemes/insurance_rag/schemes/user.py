@@ -56,3 +56,11 @@ class User(SQLAlchemyBase):
         "Conversation",
         back_populates="user"
     )
+
+    
+    memories = relationship(
+        "UserMemory",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
