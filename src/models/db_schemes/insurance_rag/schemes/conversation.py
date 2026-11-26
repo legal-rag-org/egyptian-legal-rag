@@ -17,6 +17,8 @@ class Conversation(SQLAlchemyBase):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
     summary = Column(Text, nullable=True)
+    summary_last_message_id = Column(Integer, nullable=True)
+    memory_last_message_id = Column(Integer, nullable=True)
 
     conversation_project_id = Column(Integer, ForeignKey("projects.project_id"), nullable=False)
     conversation_user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
@@ -40,5 +42,13 @@ class Conversation(SQLAlchemyBase):
         "AgentExecution",
         back_populates="conversation"
     )
+
+    
+    source_memories = relationship(
+        "UserMemory",
+        back_populates="source_conversation",
+        passive_deletes=True,
+    )
+
 
 

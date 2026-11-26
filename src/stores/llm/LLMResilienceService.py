@@ -33,6 +33,7 @@ class LLMResilienceService(LLMInterface):
         self.fallback_handler = fallback_handler
 
         self.enums = self.primary_provider.enums
+        self.embedding_size = self.primary_provider.embedding_size
 
         self.logger = logging.getLogger("uvicorn.error")
 
@@ -195,6 +196,8 @@ class LLMResilienceService(LLMInterface):
             model_id,
             embedding_size
         )
+
+        self.embedding_size = embedding_size
 
     async def generate_text(
         self,

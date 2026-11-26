@@ -1,6 +1,6 @@
 from .BaseDataModel import BaseDataModel
 from .db_schemes.insurance_rag.schemes import Conversation
-from sqlalchemy import func, select, delete
+from sqlalchemy import func, select, delete, update
 
 from uuid import UUID
 
@@ -159,27 +159,64 @@ class ConversationModel(BaseDataModel):
         self,
         conversation_id: int,
         summary: str,
+        last_message_id: int,
+        expected_last_message_id: int | None,
     ):
         async with self.db_client() as session:
             async with session.begin():
 
-                search_stmt = select(Conversation).where(
-                    Conversation.conversation_id == conversation_id
+                stmt = (
+                    update(Conversation)
+                    .where(
+                        Conversation.conversation_id == conversation_id,
+                        Conversation.summary_last_message_id
+                        == expected_last_message_id,
+                    )
+                    .values(
+                        summary=summary,
+                        summary_last_message_id=last_message_id,
+                    )
+                    .returning(Conversation.conversation_id)
                 )
 
-                result = await session.execute(search_stmt)
-                conversation = result.scalar_one_or_none()
+                result = await session.execute(stmt)
+                updated_id = result.scalar_one_or_none()
 
-                if conversation is None:
-                    raise ValueError(
-                        f"Conversation {conversation_id} not found."
+                if updated_id is None:
+                    return False
+
+            return True
+
+    
+    async def update_memory_checkpoint(
+        self,
+        conversation_id: int,
+        last_message_id: int,
+        expected_last_message_id: int | None,
+    ):
+        async with self.db_client() as session:
+            async with session.begin():
+
+                stmt = (
+                    update(Conversation)
+                    .where(
+                        Conversation.conversation_id == conversation_id,
+                        Conversation.memory_last_message_id
+                        == expected_last_message_id,
                     )
+                    .values(
+                        memory_last_message_id=last_message_id,
+                    )
+                    .returning(Conversation.conversation_id)
+                )
 
-                conversation.summary = summary
+                result = await session.execute(stmt)
+                updated_id = result.scalar_one_or_none()
 
-            await session.refresh(conversation)
+                if updated_id is None:
+                    return False
 
-        return conversation
+            return True
 
 
     

@@ -8,3 +8,4 @@ from .project import Project
 from .data_chunk import Chunk
 from .agent_execution import AgentExecution
 from .agent_step import AgentStep
+from .user_memory import UserMemory

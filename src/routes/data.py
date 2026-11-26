@@ -14,6 +14,8 @@ from models import MessageModel, ConversationModel
 from models import AgentExecutionModel, AgentStepModel
 from .schemes.data import Asset_config
 
+from models.UserMemoryModel import UserMemoryModel
+
 logger = logging.getLogger("uvicorn.error")
 
 data_router = APIRouter(
@@ -151,23 +153,28 @@ async def process_endpoint(request: Request, project_id: int, process_request: P
 
 
      chunk_model = await ChunkModel.create_instance(
-               db_client=request.app.db_client
-          )
+            db_client=request.app.db_client
+        )
 
      message_model = await MessageModel.create_instance(
-             db_client=request.app.db_client
-         )
+            db_client=request.app.db_client
+        )
      
      conversation_model = await ConversationModel.create_instance(
+            db_client=request.app.db_client
+        )
+     
+     agent_execution_model = await AgentExecutionModel.create_instance(
+            db_client=request.app.db_client
+        )
+     agent_step_model = await AgentStepModel.create_instance(
+            db_client=request.app.db_client
+        )
+
+     user_memory_model = await UserMemoryModel.create_instance(
              db_client=request.app.db_client
          )
      
-     agent_execution_model = await AgentExecutionModel.create_instance(
-             db_client=request.app.db_client
-         )
-     agent_step_model = await AgentStepModel.create_instance(
-             db_client=request.app.db_client
-         )
 
      nlp_controller = NLPController(
              vectordb_client=request.app.vectordb_client,
@@ -180,7 +187,8 @@ async def process_endpoint(request: Request, project_id: int, process_request: P
              conversation_model=conversation_model,
              vision_client=request.app.vision_client,
              agent_execution=agent_execution_model,
-             agent_step=agent_step_model
+             agent_step=agent_step_model,
+             memory_model=user_memory_model,
      )
 
      if do_reset:

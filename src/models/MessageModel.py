@@ -104,4 +104,61 @@ class MessageModel(BaseDataModel):
 
             return records_count.scalar_one()
 
-    
+
+    async def get_messages_after_id(
+        self,
+        conversation_id: int,
+        last_message_id: int | None = None,
+        limit: int = 6,
+    ):
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+
+        async with self.db_client() as session:
+
+            stmt = (
+                select(Message)
+                .where(
+                    Message.message_conversation_id == conversation_id
+                )
+            )
+
+            if last_message_id is not None:
+                stmt = stmt.where(
+                    Message.message_id > last_message_id
+                )
+
+            stmt = (
+                stmt
+                .order_by(Message.message_id.asc())
+                .limit(limit)
+            )
+
+            result = await session.execute(stmt)
+
+            return result.scalars().all()
+
+    async def get_latest_messages(
+        self,
+        conversation_id: int,
+        limit: int = 20,
+    ):
+        if limit < 1:
+            raise ValueError("limit must be >= 1")
+
+        async with self.db_client() as session:
+
+            stmt = (
+                select(Message)
+                .where(
+                    Message.message_conversation_id == conversation_id
+                )
+                .order_by(Message.message_id.desc())
+                .limit(limit)
+            )
+
+            result = await session.execute(stmt)
+
+            messages = result.scalars().all()
+
+            return list(reversed(messages))

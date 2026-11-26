@@ -11,7 +11,7 @@ import re
 
 class PGVectorProvider(VectorDBInterface):
 
-    def __init__(self, db_client, default_vector_size: int=786, 
+    def __init__(self, db_client, default_vector_size: int=1024, 
                  distance_method : str = None, index_threshold: int=100):
 
 
